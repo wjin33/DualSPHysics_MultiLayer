@@ -62,6 +62,7 @@ JSphGpu::JSphGpu(bool withmpi):JSph(false,false,withmpi),DivAxis(MGDIV_None){
   Idp=NULL; Code=NULL; Dcell=NULL; Posxy=NULL; Posz=NULL; Velrhop=NULL;
   AuxPos=NULL; AuxVel=NULL; AuxRhop=NULL;
   AuxNN = NULL; //<vs_non-Newtonian>
+  VolFrac = NULL; Sigma = NULL; 
   CellDiv=NULL;
   FtoAuxDouble6=NULL; FtoAuxFloat15=NULL; //-Calculates forces on floating bodies.
   ArraysGpu=new JArraysGpu;
@@ -149,6 +150,8 @@ void JSphGpu::InitVars(){
   SpsTaug=NULL; SpsGradvelg=NULL;                  //-Laminar+SPS. 
   D_tensorg=NULL;				  											 //-Deformation tensor. //<vs_non-Newtonian>
   AuxNNg=NULL;                   								 //-General aux <vs_non-Newtonian>
+  VolFracg = NULL;
+  Sigmag=NULL;
   ViscDtg=NULL; 
   ViscEtaDtg = NULL; 															//<vs_non-Newtonian>
   Arg=NULL; Aceg=NULL; Deltag=NULL;
@@ -274,6 +277,9 @@ void JSphGpu::FreeCpuMemoryParticles(){
   delete[] AuxVel;     AuxVel=NULL;
   delete[] AuxRhop;    AuxRhop=NULL;
   delete[] AuxNN;	     AuxNN=NULL; //<vs_non-Newtonian>
+  delete[] VolFrac;    VolFrac=NULL;
+  delete[] Sigma;      Sigma=NULL;
+
 }
 
 //==============================================================================
@@ -296,6 +302,8 @@ void JSphGpu::AllocCpuMemoryParticles(unsigned np){
       AuxVel=new tfloat3[np];    MemCpuParticles+=sizeof(tfloat3)*np;
       AuxRhop=new float[np];     MemCpuParticles+=sizeof(float)*np;
       AuxNN=new float[np];       MemCpuParticles+=sizeof(float)*np; //<vs_non-Newtonian>
+      VolFrac=new flot[np];      MemCpuParticles+=sizeof(float)*np;
+      Sigma=new tfloat3[np];     MemCpuParticles+=sizeof(tfloat3)*np;
     }
     catch(const std::bad_alloc){
       Run_Exceptioon(fun::PrintStr("Could not allocate the requested memory (np=%u).",np));
@@ -346,7 +354,12 @@ void JSphGpu::AllocGpuMemoryParticles(unsigned np,float over){
   if (TVisco != VISCO_Artificial) { //<vs_non-Newtonian>   
 	  ArraysGpu->AddArrayCount(JArraysGpu::SIZE_24B,2); //-SpsTau,SpsGradvel
   }
-  if (MultiPhase) { 			//<vs_non-Newtonian>   
+  if (MultiPhase) { 			//<vs_non-Newtonian>
+      Log->Printf("ViscoTreatment= %u ", TVisco);
+      if (TVisco == VISCO_SoilWater) {
+        ArraysGpu->AddArrayCount(JArraysGpu::SIZE_12B, 2);//-w_tensorg, Sigmag
+        ArraysGpu->AddArrayCount(JArraysGpu::SIZE_4B, 2);//-VolFracg
+        }
 	  ArraysGpu->AddArrayCount(JArraysGpu::SIZE_24B, 2); //d_tensor
 	  ArraysGpu->AddArrayCount(JArraysGpu::SIZE_4B, 2); //-Visco_eta, Visco_etaDt
 	  ArraysGpu->AddArrayCount(JArraysGpu::SIZE_4B, 1); //-AuxNN
@@ -491,6 +504,12 @@ void JSphGpu::ReserveBasicArraysGpu(){
 
   if(MultiPhase)AuxNNg=ArraysGpu->ReserveFloat();  //<vs_non-Newtonian>
   if(!MultiPhase && TVisco==VISCO_LaminarSPS)SpsTaug=ArraysGpu->ReserveSymatrix3f();  //<vs_non-Newtonian>
+  if (TVisco == VISCO_SoilWater) {
+      //SpsTaug = ArraysGpu->ReserveSymatrix3f();
+      Sigmag = ArraysGpu->ReserveFloat3(); //This is used for stress output
+      VolFracg = ArraysGpu->ReserveFloat();
+      //Forceg = ArraysGpu->ReserveFloat3();
+  }
 
   if(UseNormals){
     BoundNormalg=ArraysGpu->ReserveFloat3();
@@ -579,7 +598,10 @@ void JSphGpu::ConstantDataUp(){
   ctes.domposminx=DomPosMin.x; ctes.domposminy=DomPosMin.y; ctes.domposminz=DomPosMin.z;
   cusph::CteInteractionUp(&ctes);
   //<vs_non-Newtonian>
-  if(MultiPhase)cusphNN::CteInteractionUp_NN(PhaseCount,PhaseCte,PhaseArray);
+  if (MultiPhase) {
+      if (TVisco == VISCO_SoilWater) cusphNN::CteInteractionUp_NN(PhaseCount, PhaseDruckerPrager);
+      else cusphNN::CteInteractionUp_NN(PhaseCount, PhaseCte, PhaseArray);
+  }
   //CheckCudaError("CteInteractionUp_NN", "Failed copying constants to GPU.");
   Check_CudaErroor("Failed copying constants to GPU.");
 }
@@ -596,7 +618,11 @@ void JSphGpu::ParticlesDataUp(unsigned n,const tfloat3 *boundnormal){
   cudaMemcpy(Poszg   ,Posz   ,sizeof(double)*n  ,cudaMemcpyHostToDevice);
   cudaMemcpy(Velrhopg,Velrhop,sizeof(float4)*n  ,cudaMemcpyHostToDevice);
   if(UseNormals)cudaMemcpy(BoundNormalg,boundnormal,sizeof(float3)*n,cudaMemcpyHostToDevice);
-  if(MultiPhase)cudaMemcpy(AuxNNg,AuxNN,sizeof(float)*n,cudaMemcpyHostToDevice); //<vs_non-Newtonian>
+  if(MultiPhase && TVisco!=VISCO_SoilWater)cudaMemcpy(AuxNNg,AuxNN,sizeof(float)*n,cudaMemcpyHostToDevice); //<vs_non-Newtonian>
+  if(TVisco= = VISCO_SoilWater){
+    //cudaMemcpy(Forceg   ,Force   ,sizeof(float3)*n  ,cudaMemcpyHostToDevice);
+    cudaMemcpy(VolFracg,VolFrac,sizeof(float)*n  ,cudaMemcpyHostToDevice);
+  }
   Check_CudaErroor("Failed copying data to GPU.");
 }
 
@@ -618,6 +644,12 @@ unsigned JSphGpu::ParticlesDataDown(unsigned n,unsigned pini,bool code,bool only
   cudaMemcpy(Posz   ,Poszg   +pini,sizeof(double)  *n,cudaMemcpyDeviceToHost);
   cudaMemcpy(Velrhop,Velrhopg+pini,sizeof(float4)  *n,cudaMemcpyDeviceToHost);
   if(code || onlynormal)cudaMemcpy(Code,Codeg+pini,sizeof(typecode)*n,cudaMemcpyDeviceToHost);
+  if (TVisco == VISCO_SoilWater) {
+      //cusph::DownloadSpsTau(Np, Npb, SpsTaug, Sigmag);
+      cudaMemcpy(Sigma, Sigmag + pini, sizeof(float3) * n, cudaMemcpyDeviceToHost);
+      cudaMemcpy(VolFrac,VolFracg+pini,sizeof(float)*n,cudaMemcpyDeviceToHost);
+      //cudaMemcpy(Force, Forceg + pini, sizeof(float3) * n, cudaMemcpyDeviceToHost);
+  }
   //if (aux)cudaMemcpy(AuxNN, AuxNNg + pini, sizeof(float)*n, cudaMemcpyDeviceToHost);
   Check_CudaErroor("Failed copying data from GPU.");
   //-Eliminates abnormal particles (periodic and others). | Elimina particulas no normales (periodicas y otras).
@@ -632,6 +664,11 @@ unsigned JSphGpu::ParticlesDataDown(unsigned n,unsigned pini,bool code,bool only
         Velrhop[p-ndel]=Velrhop[p];
         Code[p-ndel]   =Code[p];
 				//if(aux)AuxNN[p - ndel] = AuxNN[p];
+        if (TVisco == VISCO_SoilWater) {
+            Sigma[p - ndel] = Sigma[p];
+            VolFrac[p-ndel]=VolFrac[p];
+            //Force[p - ndel] = Force[p];
+        }
       }
       if(!normal)ndel++;
     }
@@ -864,6 +901,12 @@ void JSphGpu::InitRunGpu(){
 
   if(TStep==STEP_Verlet)cudaMemcpy(VelrhopM1g,Velrhopg,sizeof(float4)*Np,cudaMemcpyDeviceToDevice);
   if(!MultiPhase && TVisco==VISCO_LaminarSPS)cudaMemset(SpsTaug,0,sizeof(tsymatrix3f)*Np); //<vs_non-Newtonian>
+  if(TVISCO==VISCO_SoilWater){
+      cudaMemset(SpsTaug,0,sizeof(tsymatrix3f)*Np); //<vs_non-Newtonian>
+      //cudaMemset(Forceg,0,sizeof(float3)*Np);
+      cudaMemset(VolFracg,0,sizeof(float)*Np);
+      cusph::InitializeVolFracRhoTau(Np,Npb,Codeg,SpsTaug,VolFracg,TVisco);
+  }
   if(CaseNfloat)InitFloating();
   if(MotionVelg)cudaMemset(MotionVelg,0,sizeof(float3)*Np);
   Check_CudaErroor("Failed initializing variables for execution.");
@@ -951,6 +994,10 @@ void JSphGpu::PosInteraction_Forces(){
     ArraysGpu->Free(Visco_etag);	 Visco_etag=NULL;
     ArraysGpu->Free(ViscEtaDtg);	 ViscEtaDtg=NULL;
     ArraysGpu->Free(SpsTaug); SpsTaug=NULL;
+    if (TVisco != VISCO_SoilWater) {
+      ArraysGpu->Free(SpsTaug);      SpsTaug = NULL;
+      ArraysGpu->Free(VolFracg);  VolFracg = NULL;
+    }
   }
 }
 

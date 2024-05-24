@@ -525,9 +525,13 @@ protected:
   float lamda;								///<time step relaxation parameter.
   StPhaseCte* PhaseCte;       ///<Contains constants of non-newtonian phases [PhaseCount].
   StPhaseArray* PhaseArray;   ///<Contains arrays (0/1) of non-newtonian phases [PhaseCount].
+  StPhaseDruckerPrager* PhaseDruckerPrager;     ///contains Drucker-Prager elastoplastic phase material parameters and initial stress condition
+
 
   void InitMultiPhase(const JXml *sxml,std::string xmlpath);
+  void InitDPPhase(const JXml* sxml, std::string xmlpath);
   void ConfigConstantsMP();
+  void ConfigConstantsMP_DP();
   void LoadMultiphaseData(unsigned np,const unsigned *idp,const typecode *code,tfloat4 *velrhop,float *auxNN)const;
 
   static std::string GetPhaseName(bool multiphase);

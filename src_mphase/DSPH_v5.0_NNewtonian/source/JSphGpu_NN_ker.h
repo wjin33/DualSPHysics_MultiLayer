@@ -29,6 +29,7 @@ You should have received a copy of the GNU Lesser General Public License along w
 namespace cusphNN {
 
   void CteInteractionUp_NN(unsigned phasecount,const StPhaseCte *phasecte,const StPhaseArray *phasearray);
+  void CteInteractionUp_NN(unsigned phasecount,const StPhaseDruckerPrager *phaseDruckerPrager);
   void PeriodicDuplicateVerlet(unsigned n,unsigned pini,tuint3 domcells,tdouble3 perinc
     ,const unsigned *listp,unsigned *idp,typecode *code,unsigned *dcell
     ,double2 *posxy,double *posz,float4 *velrhop,float *auxnn,float4 *velrhopm1);
@@ -37,7 +38,7 @@ namespace cusphNN {
     ,double2 *posxy,double *posz,float4 *velrhop,float *auxnn,double2 *posxypre,double *poszpre,float4 *velrhoppre);
 
   //-Kernels for the force calculation.
-  void Interaction_ForcesNN(const StInterParmsg &t);
+  void Interaction_ForcesNN(const StInterParmsg &t, double time_inc);
 
 }//end of file
 #endif

@@ -626,6 +626,8 @@ void JSph::LoadConfigParameters(const JXml *xml){
     case 1:  TVisco=VISCO_Artificial;  break;
     case 2:  TVisco=VISCO_LaminarSPS;  break;
     case 3:  TVisco=VISCO_ConstEq;     break;  //<vs_non-Newtonian>
+    case 4:  TVisco=VISCO_SoilWater;   break; ///<vs_water+soil>
+
     default: Run_Exceptioon("Viscosity treatment is not valid.");
   }
   Visco=eparms.GetValueFloat("Visco");
@@ -648,6 +650,9 @@ void JSph::LoadConfigParameters(const JXml *xml){
       case 1:  SlipMode=SLIP_Vel0;      break;
       case 2:  SlipMode=SLIP_NoSlip;    break;
       case 3:  SlipMode=SLIP_FreeSlip;  break;
+      case 4: SlipMode=SLIP_Friction_Zhan;  break;
+      case 5: SlipMode=SLIP_NoSlip_Zhan; break;
+      case 6: SlipMode=SLIP_FreeSlip_Zhan; break;
       default: Run_Exceptioon("Slip mode is not valid.");
     }
     MdbcCorrector=(eparms.GetValueInt("MDBCCorrector",true,0)!=0);
@@ -793,6 +798,9 @@ void JSph::LoadConfigCommands(const JSphCfgRun *cfg){
       case 1:  SlipMode=SLIP_Vel0;      break;
       case 2:  SlipMode=SLIP_NoSlip;    break;
       case 3:  SlipMode=SLIP_FreeSlip;  break;
+      case 4:  SlipMode=SLIP_Friction_Zhan; break;
+      case 5: SlipMode=SLIP_NoSlip_Zhan; break;
+      case 6: SlipMode=SLIP_FreeSlip_Zhan; break;
       default: Run_Exceptioon("Slip mode for mDBC is not valid.");
     }
     UseNormals=(TBoundary==BC_MDBC);
@@ -1197,7 +1205,15 @@ void JSph::LoadCaseConfig(const JSphCfgRun *cfg){
       if(TVisco==VISCO_Artificial)Log->PrintWarning("You are running non-Newtonian formulations using artificial viscosity.");
       InitMultiPhase(&xml,"case.execution.special.nnphases");
       ConfigConstantsMP();
-    } //<vs_non-Newtonian_end>		
+    } //<vs_non-Newtonian_end>
+    if(xml.GetNodeSimple("case.execution.special.druckerprager",true)) {
+      //For v5.0 NN version disable some options
+      if(InOut)Run_Exceptioon("Multiphase formulations are not supported with inlet/outlet option.");
+      // if(TBoundary==BC_MDBC)Run_Exceptioon("Multiphase formulations are not supported with BC_mDBC.");x
+      if(TVisco==VISCO_Artificial)Log->PrintWarning("You are running non-Newtonian formulations using artificial viscosity.");
+      InitDPPhase(&xml,"case.execution.special.nnphase");
+      ConfigConstantsMP_DP();
+    }		
   }
   if(TVisco==VISCO_ConstEq&&!MultiPhase)Run_Exceptioon("ViscoTreatment 'Constitutive  eq.' not valid for Single-phase classic formulation.");
 
@@ -3214,6 +3230,76 @@ void JSph::InitMultiPhase(const JXml *sxml,std::string xmlpath) {
 }
 
 //==============================================================================
+// Load related data and adjusts Multi-phase for Drucker-Prager elastoplasticity
+//==============================================================================
+void JSph::InitDPPhase(const JXml *sxml,std::string xmlpath) {
+  Log->Print("");
+  Log->Print("[Drucker-Prager-phase configuration]\n");
+  TiXmlNode* node=sxml->GetNodeSimple("case.execution.special.DruckerPrager");
+  sxml->CheckElementNames(node->ToElement(),true,"*phase");
+  PhaseCount=sxml->CountElements(node,"phase");
+
+  Log->Printf("==: PhaseCount:%d",PhaseCount);
+  PhaseDruckerPrager=new StPhaseDruckerPrager[PhaseCount]; 	memset(PhaseDruckerPrager,0,sizeof(StPhaseDruckerPrager)*PhaseCount);
+  if(PhaseCount<1)Run_Exceptioon("The number of phases is invalid.");
+  TiXmlElement* ele=node->FirstChildElement("phase");
+  for(unsigned c=0; ele; c++) {
+    sxml->CheckElementNames(ele,true,"DP_Cs0 DP_visco DP_rho DP_VolFrac DP_G DP_K MC_phi MC_c MC_psi DP_wallfriction DP_Dc Drag_alphad Drag_betad");
+    const word mkfluid=sxml->GetAttributeWord(ele,"mkfluid");
+    PhaseDruckerPrager[c].mkfluid=mkfluid;
+    unsigned cmk=MkInfo->GetMkBlockByMkFluid(PhaseDruckerPrager[c].mkfluid);
+    if(cmk>=MkInfo->Size())Run_Exceptioon(fun::PrintStr("No particles with mkfluid=%u",mkfluid));
+    const JSphMkBlock* bk=MkInfo->Mkblock(cmk);
+
+    //PhaseArray holds physical proprerties of phases
+    PhaseDruckerPrager[c].phaseid=c;
+    PhaseDruckerPrager[c].DP_rho=sxml->ReadElementFloat(ele,"DP_rhop","value");
+    PhaseDruckerPrager[c].DP_Cs0=sxml->ReadElementFloat(ele,"DP_csound","value",true);
+    PhaseDruckerPrager[c].DP_visco=sxml->ReadElementFloat(ele,"DP_visco","value");
+    PhaseDruckerPrager[c].idbegin=bk->Begin;
+    PhaseDruckerPrager[c].count=bk->Count;
+    PhaseDruckerPrager[c].DP_wallfriction = sxml->ReadElementFloat(ele,"DP_wallfriction","value");
+    PhaseDruckerPrager[c].DP_VolFrac=sxml->ReadElementFloat(ele,"DP_VolFrac","value");
+    PhaseDruckerPrager[c].DP_G=sxml->ReadElementFloat(ele,"DP_G","value");
+    PhaseDruckerPrager[c].DP_K= sxml->ReadElementFloat(ele, "DP_K", "value");
+    PhaseDruckerPrager[c].MC_phi=sxml->ReadElementFloat(ele,"MC_phi","value");
+    PhaseDruckerPrager[c].MC_c=sxml->ReadElementFloat(ele,"MC_c","value");
+    PhaseDruckerPrager[c].MC_psi=sxml->ReadElementFloat(ele,"MC_psi","value");
+    PhaseDruckerPrager[c].DP_Dc=sxml->ReadElementFloat(ele,"DP_Dc","value");
+    PhaseDruckerPrager[c].Drag_alphad=sxml->ReadElementFloat(ele,"Drag_alphad","value");
+    PhaseDruckerPrager[c].Drag_betad=sxml->ReadElementFloat(ele,"Drag_betad","value");
+    PhaseDruckerPrager[c].phasetype=sxml->ReadElementUnsigned(ele,"phasetype","value");   //only 0 in v 5.0 supported
+    ele=ele->NextSiblingElement("phase");
+  }
+  //-Sort phases according mkfluid.
+  for(unsigned c=0; c<PhaseCount-1; c++)for(unsigned c2=c+1; c2<PhaseCount; c2++)if(PhaseDruckerPrager[c].mkfluid>PhaseDruckerPrager[c2].mkfluid){
+    StPhaseDruckerPrager a=PhaseDruckerPrager[c];
+    PhaseDruckerPrager[c]=PhaseDruckerPrager[c2];
+    PhaseDruckerPrager[c2]=a;
+  }
+  //-Shows phase information.
+  Log->Printf("PhaseCount:%d",PhaseCount);
+  for(unsigned c=0; c<=PhaseCount-1; c++) {
+    const StPhaseDruckerPrager &ar=PhaseDruckerPrager[c];
+    Log->Printf("Phase %d",c);
+    Log->Printf("  DP_rhop......: %f",ar.DP_rho);
+    if(ar.DP_Cs0)Log->Printf("  DP_Cs0......: %f",ar.DP_Cs0);
+    Log->Printf("  DP artificial alpha: %f",ar.DP_visco);
+    Log->Printf("  DP wall friction: %f",ar.DP_wallfriction);
+    Log->Printf("  DP volumetric fraction: %f",ar.DP_VolFrac);
+    Log->Printf("  DP Shear modulus: %f",ar.DP_G);
+    Log->Printf("  DP Elastic modulus: %f",ar.DP_K);
+    Log->Printf("  MC_phi: %f",ar.MC_phi);
+    Log->Printf("  MC_c: %f",ar.MC_c);
+    Log->Printf("  MC_psi: %f",ar.MC_psi);
+    Log->Printf("  DP_Dc: %f",ar.DP_Dc);
+    Log->Printf("  DP Drag_alphad: %f",ar.Drag_alphad);
+    Log->Printf("  DP Drag_betad: %f",ar.Drag_betad);
+  }
+  Log->Print("");
+}
+
+//==============================================================================
 /// Configures value of constants for NN-MultiPhase.
 /// Updates Cs0 and CoefDtMin
 //==============================================================================
@@ -3239,6 +3325,24 @@ void JSph::ConfigConstantsMP(){
   }
   CoefDtMin*=1.0e-5f;
   DtMin=(KernelH/Cs0)*CoefDtMin;
+}
+
+void JSph::ConfigConstantsMP_DP(){
+  //Check if Cs0 is present for ALL phases
+  bool Cs0_present=true;
+  for(unsigned c=0; c<PhaseCount; c++)if(!PhaseDruckerPrager[c].DP_Cs0)Cs0_present=false;
+  if(Cs0_present){
+    //Compute a new Cs0 for all system
+    CSP.cs0=0;
+    for(unsigned c=0; c<PhaseCount; c++) {
+      CSP.cs0=max(CSP.cs0,double(PhaseDruckerPrager[c].DP_Cs0));
+      //CteB has already been calculated in InitMultiphase
+      PhaseDruckerPrager[c].mass=float(PhaseDruckerPrager[c].DP_rho*(Simulate2D ? Dp*Dp : Dp*Dp*Dp));
+    }
+  }
+  CoefDtMin*=1.0e-5f;
+  DtMin=(KernelH/Cs0)*CoefDtMin;
+  printf("DtMin = %f", DtMin);
 }
 
 //==============================================================================

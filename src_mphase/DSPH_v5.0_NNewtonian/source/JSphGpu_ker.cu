@@ -33,7 +33,10 @@
 #include <thrust/device_vector.h>
 #include <thrust/sort.h>
 
+#define MAXNUMBERPHASE 10
+
 __constant__ StCteInteraction CTE;
+__constant__ StPhaseDruckerPrager PHASEDRUCKERPRAGER[MAXNUMBERPHASE];
 #define CTE_AVAILABLE
 
 namespace cusph{
@@ -1539,6 +1542,30 @@ __global__ void KerComputeSpsTau(unsigned n,unsigned pini,float smag,float blin
     const float tau_yz=one_rho2*(visc_sps   *grad_yz);
     const float tau_zz=one_rho2*(twovisc_sps*grad_zz +sumsps);
     tauff[p1*3+2]=make_float2(tau_yz,tau_zz);
+  }
+}
+
+__global__ void kerInitializeVolFracRhoTau(unsigned n,unsigned pini,const typecode *code
+  ,float2 *tauff, float *void_ratio,float3 *force,TpVisco tvisco)
+{
+  unsigned p=blockIdx.x*blockDim.x + threadIdx.x; 
+  if(p<n){
+    const unsigned p1=p+pini;
+    const typecode pp1=CODE_GetTypeValue(code[p1]); //phase information
+    tauff[p1*3]=make_float2(0,0);
+    tauff[p1*3+1]=make_float2(0,0);
+    tauff[p1*3+2]=make_float2(0,0);
+    if(pp1 == 0){
+    }
+  }
+}
+
+void InitializeVolFracRhoTau(unsigned np,unsigned npb,const typecode *code, tsymatrix3f *tau, float *Void_ratiog, float3 *Forceg,TpVisco tvisco, cudaStream_t stm)
+{
+  const unsigned npf=np-npb;
+  if(npf){
+    dim3 sgridf=GetSimpleGridSize(npf,SPHBSIZE);
+    KerInitializeSpsTauVoidForce <<<sgridf,SPHBSIZE,0,stm>>> (npf,npb,code,(float2*)tau,Void_ratiog,(float3*)Forceg,tvisco);
   }
 }
 

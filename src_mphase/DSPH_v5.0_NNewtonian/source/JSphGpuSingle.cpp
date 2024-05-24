@@ -382,10 +382,18 @@ void JSphGpuSingle::RunCellDivide(bool updateperiodic){
     swap(SpsTaug,spstaug);  ArraysGpu->Free(spstaug);
   }
   if(MultiPhase) {  //<vs_non-Newtonian>
+    if (TVisco == VISCO_SoilWater) {
+       tsymatrix3f* spstaug = ArraysGpu->ReserveSymatrix3f();
+       CellDivSingle->SortDataArrays(SpsTaug, spstaug);
+       swap(SpsTaug, spstaug);  ArraysGpu->Free(spstaug);
+       float *VolFrac=ArraysGpu->ReserveFloat();
+       CellDivSingle->SortDataArrays(VolFracg,VolFrac);
+       swap(VolFracg,VolFrac);  ArraysGpu->Free(VolFrac);
+    }else{
     float *auxg=ArraysGpu->ReserveFloat();
     CellDivSingle->SortDataArrays(AuxNNg,auxg);
     swap(AuxNNg,auxg);  ArraysGpu->Free(auxg);
-
+    }
     //tsymatrix3f *spstaug = ArraysGpu->ReserveSymatrix3f();
     //CellDivSingle->SortDataArrays(SpsTaug, spstaug);
     //swap(SpsTaug, spstaug);  ArraysGpu->Free(spstaug);
@@ -448,7 +456,7 @@ void JSphGpuSingle::AbortBoundOut(){
 /// Interaction for force computation.
 /// Interaccion para el calculo de fuerzas.
 //==============================================================================
-void JSphGpuSingle::Interaction_Forces(TpInterStep interstep){
+void JSphGpuSingle::Interaction_Forces(TpInterStep interstep, double time_inc){
   if(TBoundary==BC_MDBC && (MdbcCorrector || interstep!=INTERSTEP_SymCorrector))MdbcBoundCorrection(); //-Boundary correction for mDBC.
   InterStep=interstep;
   PreInteraction_Forces();
@@ -469,12 +477,12 @@ void JSphGpuSingle::Interaction_Forces(TpInterStep interstep){
     ,Posxyg,Poszg,PosCellg,Velrhopg,Idpg,Codeg
     ,FtoMasspg
     ,ViscDtg, ViscEtaDtg,Arg,Aceg,Deltag
-    ,Visco_etag, SpsTaug, SpsGradvelg, D_tensorg, AuxNNg
-    ,ShiftPosfsg
+    ,Visco_etag, SpsTaug, SpsGradvelg, D_tensorg, VolFracg, AuxNNg
+    ,ShiftPosfsg 
     ,NULL,NULL);
 
   if(!MultiPhase)cusph::Interaction_Forces(parms);
-  else         cusphNN::Interaction_ForcesNN(parms);  //<vs_non-Newtonian>
+  else         cusphNN::Interaction_ForcesNN(parms, time_inc);  //<vs_non-Newtonian>
 
   //-Interaction DEM Floating-Bound & Floating-Floating. //(DEM)
   if(UseDEM)cusph::Interaction_ForcesDem(BlockSizes.forcesdem,CaseNfloat
@@ -918,6 +926,8 @@ void JSphGpuSingle::SaveData(){
   //-Stores particle data. | Graba datos de particulas.
   JDataArrays arrays;
   AddBasicArrays(arrays,npsave,AuxPos,Idp,AuxVel,AuxRhop);
+  if (Sigma) arrays.AddArray("Sigma",npsave,Sigma);
+  if (VolFrac)  arrays.AddArray("VolFrac",npsave,VolFrac);
   JSph::SaveData(npsave,arrays,1,vdom,&infoplus);
   if(UseNormals && SvNormals)SaveVtkNormalsGpu("normals/Normals.vtk",Part,npsave,Npb,Posxyg,Poszg,Idpg,BoundNormalg);
   TmgStop(Timers,TMG_SuSavePart);

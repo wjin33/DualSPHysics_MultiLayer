@@ -331,6 +331,32 @@ typedef struct {
 }StPhaseArray;
 //<vs_non-Newtonian_end>
 
+///Structure PhaseArray holds physical proprerties of phase for Drucker-Prager elastoplasticity
+typedef struct {
+  //==================================================
+  // Drucker-Prager model constitutive parameters 
+  //==================================================
+    word mkfluid;				///<Mk of the phase
+    int phaseid;		///<ID of the phase
+    unsigned idbegin;		///<First id of phase.
+    unsigned count;			///<Number of particles in phase.
+    float mass;			///<Mass of the phase
+    float DP_Cs0;			///<Speed of sound of phase
+    float DP_visco;		///<viscosity of the phase. 
+    float DP_rho; ///Apparent density of the phase, not solid density (DP_rho_s), Dp_rho = Dp_VolFrac * Dp_rho_s
+    float DP_VolFrac; ///initial volume fraction of the granular phase
+    float DP_G; /// Elastic shear Modulus
+    float DP_K; /// Elastic Bulk Modulus
+    float MC_phi; /// Friction angle in MC model, to be converted to DP yield surface parameters DP_AlphaPhi and DP_kc
+    float MC_c;    ///< Cohesion in MC model, to be converted to DP yield surface parameters DP_AlphaPhi and DP_kc
+    float MC_psi;    /// Dilatancy angle in MC model, to be converted to DP non-associate flow rule parameter DP_psi
+    float DP_wallfriction; /// Wall friction, not used in mDBC but used in the predictor-corrector wall by Zhao et al., 2023
+    float DP_Dc; /// Characterisitc length of the soil grains, usually take as D50 for coarse grain soils.
+    float Drag_alphad; /// A constant for drag force calculation, default to 150
+    float Drag_betad; /// A constant for drag force calculation, default to 1.75  
+    unsigned phasetype; ///<Typer of phase
+}StPhaseDruckerPrager;
+//<vs_non-Newtonian_end>
 
 ///Controls the output of information on the screen and/or log.
 typedef enum{ 
@@ -374,6 +400,7 @@ typedef enum {
 
 ///Types of viscosity treatment.
 typedef enum{ 
+  VISCO_SoilWater = 4, ///<Water phase use artificial viscosity + soil phase use constitutive equation
   VISCO_ConstEq = 3,				 ///<Constitutive equation for viscous forces.  //<vs_non-Newtonian
   VISCO_LaminarSPS=2,        ///<Laminar viscosity and Sub-Partice Scale Turbulence.
   VISCO_Artificial=1,        ///<Artificial viscosity.
@@ -387,7 +414,10 @@ typedef enum{
 }TpBoundary;
 
 ///Types of boundary conditions. 
-typedef enum{ 
+typedef enum{
+  SLIP_FreeSlip_Zhan=6, /// Free slip (Zhan et al., 2020), not compatible to mDBC
+  SLIP_NoSlip_Zhan=5, /// No slip (Zhan et al., 2020), not compatible to mDBC
+  SLIP_Friction_Zhan=4, /// Frictional slip (Zhan et al., 2020), not compatible to mDBC 
   SLIP_FreeSlip=3,  ///<Free slip
   SLIP_NoSlip=2,    ///<No-slip
   SLIP_Vel0=1       ///<DBC vel=0

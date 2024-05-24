@@ -115,6 +115,8 @@ protected:
   tfloat3 *AuxVel; 
   float *AuxRhop;
   float *AuxNN;			  ///<Auxilary. vs_non-Newtonian
+  float *VolFrac; //volume fraction in host
+  tfloat3* Sigma;   ///stress diagnoal component in host for output
 
   unsigned GpuParticlesAllocs;///<Number of allocations.
   unsigned GpuParticlesSize;  ///<Number of particles for which GPU memory was allocated. | Numero de particulas para las cuales se reservo memoria en gpu.
@@ -196,9 +198,11 @@ protected:
   //<vs_non-Newtonian>
   float *Visco_etag;		  ///<Effective viscosity.  
   tsymatrix3f *SpsTaug;       ///<SPS sub-particle stress tensor.
+  float3* Sigmag;             /// stress tensor diagonal components
   tsymatrix3f *SpsGradvelg;  ///<Velocity gradients.
   tsymatrix3f *D_tensorg;     ///<Deformation tensor. 
   float *AuxNNg;	         ///<Auxilary vs_non-Newtonian
+  float *VolFracg;         ///Volume fraction at GPU memory
 
   TimersGpu Timers;  ///<Declares an array with timers for CPU (type structure \ref StSphTimerGpu).
 

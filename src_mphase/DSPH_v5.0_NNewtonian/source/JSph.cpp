@@ -1201,7 +1201,7 @@ void JSph::LoadCaseConfig(const JSphCfgRun *cfg){
     if(xml.GetNodeSimple("case.execution.special.nnphases",true)) {
       //For v5.0 NN version disable some options
       if(InOut)Run_Exceptioon("Multiphase formulations are not supported with inlet/outlet option.");
-      if(TBoundary==BC_MDBC)Run_Exceptioon("Multiphase formulations are not supported with BC_mDBC.");
+      //if(TBoundary==BC_MDBC)Run_Exceptioon("Multiphase formulations are not supported with BC_mDBC.");
       if(TVisco==VISCO_Artificial)Log->PrintWarning("You are running non-Newtonian formulations using artificial viscosity.");
       InitMultiPhase(&xml,"case.execution.special.nnphases");
       ConfigConstantsMP();

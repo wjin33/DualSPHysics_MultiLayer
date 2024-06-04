@@ -2359,4 +2359,1035 @@ void Interaction_ForcesNN(const StInterParmsg &t) {
 }
 //======================End of NN Templates=======================================
 
+//======================Start of Multi-layer MDBC=====================================
+//------------------------------------------------------------------------------
+/// Perform interaction between ghost node of selected bondary and domain particle for water phase.
+//------------------------------------------------------------------------------
+template<TpKernel tker, bool sim2d, TpSlipMode tslip> __global__ void KerInteractionMdbcCorrectionNNFluid_Fast
+(unsigned n, unsigned nbound, float determlimit, float mdbcthreshold
+	, double3 mapposmin, float poscellsize, const float4 *poscell
+	, int scelldiv, int4 nc, int3 cellzero, const int2 *beginendcellfluid
+	, const double2 *posxy, const double *posz, const typecode *code, const unsigned *idp
+	, const float3 *boundnormal, const float3 *motionvel, float4 *velrhop)
+{
+	const unsigned p1 = blockIdx.x*blockDim.x + threadIdx.x; //-Number of particle.
+	if (p1<n) {
+		const float3 bnormalp1 = boundnormal[p1];
+		if (bnormalp1.x != 0 || bnormalp1.y != 0 || bnormalp1.z != 0) {
+			float rhopfinal = FLT_MAX;
+			float3 velrhopfinal = make_float3(0, 0, 0);
+			float sumwab = 0;
+
+			//-Calculates ghost node position.
+			double3 gposp1 = make_double3(posxy[p1].x + bnormalp1.x, posxy[p1].y + bnormalp1.y, posz[p1] + bnormalp1.z);
+			gposp1 = (CTE.periactive != 0 ? cusph::KerUpdatePeriodicPos(gposp1) : gposp1); //-Corrected interface Position.
+			const float4 gpscellp1 = cusph::KerComputePosCell(gposp1, mapposmin, poscellsize);
+
+			//-Initializes variables for calculation.
+			float rhopp1 = 0;
+			float3 gradrhopp1 = make_float3(0, 0, 0);
+			float3 velp1 = make_float3(0, 0, 0);                              // -Only for velocity
+			tmatrix3f a_corr2; if (sim2d) cumath::Tmatrix3fReset(a_corr2); //-Only for 2D.
+			tmatrix4f a_corr3; if (!sim2d)cumath::Tmatrix4fReset(a_corr3); //-Only for 3D.
+
+			//-Obtains neighborhood search limits.
+			int ini1, fin1, ini2, fin2, ini3, fin3;
+			cunsearch::InitCte(gposp1.x, gposp1.y, gposp1.z, scelldiv, nc, cellzero, ini1, fin1, ini2, fin2, ini3, fin3);
+
+			//-Boundary-Fluid interaction.
+			for (int c3 = ini3; c3<fin3; c3 += nc.w)for (int c2 = ini2; c2<fin2; c2 += nc.x) {
+				unsigned pini, pfin = 0;  cunsearch::ParticleRange(c2, c3, ini1, fin1, beginendcellfluid, pini, pfin);
+				if (pfin)for (unsigned p2 = pini; p2<pfin; p2++) {
+					const float4 pscellp2 = poscell[p2];
+					float drx = gpscellp1.x - pscellp2.x + CTE.poscellsize*(CEL_GetX(__float_as_int(gpscellp1.w)) - CEL_GetX(__float_as_int(pscellp2.w)));
+					float dry = gpscellp1.y - pscellp2.y + CTE.poscellsize*(CEL_GetY(__float_as_int(gpscellp1.w)) - CEL_GetY(__float_as_int(pscellp2.w)));
+					float drz = gpscellp1.z - pscellp2.z + CTE.poscellsize*(CEL_GetZ(__float_as_int(gpscellp1.w)) - CEL_GetZ(__float_as_int(pscellp2.w)));
+					const float rr2 = drx*drx + dry*dry + drz*drz;
+					const typecode pp2 = CODE_GetTypeValue(code[p2]); //<vs_non-Newtonian>
+					if (rr2 <= CTE.kernelsize2 && rr2 >= ALMOSTZERO && CODE_IsFluid(code[p2])&&pp2==0) {//-Only with domain particles in water phase (including inout).
+						//-Computes kernel.
+						float fac;
+						const float wab = cufsph::GetKernel_WabFac<tker>(rr2, fac);
+						const float frx = fac*drx, fry = fac*dry, frz = fac*drz; //-Gradients.
+
+						//===== Get mass and volume of particle p2 =====
+						const float4 velrhopp2 = velrhop[p2];
+						//float massp2 = CTE.massf;
+
+						
+						float massp2 = PHASEARRAY[pp2].mass; //-Contiene masa de particula segun sea bound o fluid.
+
+						const float volp2 = massp2 / velrhopp2.w;
+
+						//===== Density and its gradient =====
+						rhopp1 += massp2*wab;
+						gradrhopp1.x += massp2*frx;
+						gradrhopp1.y += massp2*fry;
+						gradrhopp1.z += massp2*frz;
+
+						//===== Kernel values multiplied by volume =====
+						const float vwab = wab*volp2;
+						sumwab += vwab;
+						const float vfrx = frx*volp2;
+						const float vfry = fry*volp2;
+						const float vfrz = frz*volp2;
+
+						//===== Velocity =====
+						if (tslip != SLIP_Vel0) {
+							velp1.x += vwab*velrhopp2.x;
+							velp1.y += vwab*velrhopp2.y;
+							velp1.z += vwab*velrhopp2.z;
+						}
+
+						//===== Matrix A for correction =====
+						if (sim2d) {
+							a_corr2.a11 += vwab;  a_corr2.a12 += drx*vwab;  a_corr2.a13 += drz*vwab;
+							a_corr2.a21 += vfrx;  a_corr2.a22 += drx*vfrx;  a_corr2.a23 += drz*vfrx;
+							a_corr2.a31 += vfrz;  a_corr2.a32 += drx*vfrz;  a_corr2.a33 += drz*vfrz;
+						}
+						else {
+							a_corr3.a11 += vwab;  a_corr3.a12 += drx*vwab;  a_corr3.a13 += dry*vwab;  a_corr3.a14 += drz*vwab;
+							a_corr3.a21 += vfrx;  a_corr3.a22 += drx*vfrx;  a_corr3.a23 += dry*vfrx;  a_corr3.a24 += drz*vfrx;
+							a_corr3.a31 += vfry;  a_corr3.a32 += drx*vfry;  a_corr3.a33 += dry*vfry;  a_corr3.a34 += drz*vfry;
+							a_corr3.a41 += vfrz;  a_corr3.a42 += drx*vfrz;  a_corr3.a43 += dry*vfrz;  a_corr3.a44 += drz*vfrz;
+						}
+					}
+				}
+			}
+
+			//-Store the results.
+			//--------------------
+			if (sumwab >= mdbcthreshold) {
+				const float3 dpos = make_float3(-bnormalp1.x, -bnormalp1.y, -bnormalp1.z); //-Boundary particle position - ghost node position.
+				if (sim2d) {
+					const double determ = cumath::Determinant3x3dbl(a_corr2);
+					if (fabs(determ) >= determlimit) {//-Use 1e-3f (first_order) or 1e+3f (zeroth_order).
+						const tmatrix3f invacorr2 = cumath::InverseMatrix3x3dbl(a_corr2, determ);
+						//-GHOST NODE DENSITY IS MIRRORED BACK TO THE BOUNDARY PARTICLES.
+						const float rhoghost = float(invacorr2.a11*rhopp1 + invacorr2.a12*gradrhopp1.x + invacorr2.a13*gradrhopp1.z);
+						const float grx = -float(invacorr2.a21*rhopp1 + invacorr2.a22*gradrhopp1.x + invacorr2.a23*gradrhopp1.z);
+						const float grz = -float(invacorr2.a31*rhopp1 + invacorr2.a32*gradrhopp1.x + invacorr2.a33*gradrhopp1.z);
+						rhopfinal = (rhoghost + grx*dpos.x + grz*dpos.z);
+					}
+					else if (a_corr2.a11>0) {//-Determinant is small but a11 is nonzero, 0th order ANGELO.
+						rhopfinal = float(rhopp1 / a_corr2.a11);
+					}
+					//-Ghost node velocity (0th order).
+					if (tslip != SLIP_Vel0) {
+						velrhopfinal.x = float(velp1.x / a_corr2.a11);
+						velrhopfinal.z = float(velp1.z / a_corr2.a11);
+						velrhopfinal.y = 0;
+					}
+				}
+				else {
+					const double determ = cumath::Determinant4x4dbl(a_corr3);
+					if (fabs(determ) >= determlimit) {
+						const tmatrix4f invacorr3 = cumath::InverseMatrix4x4dbl(a_corr3, determ);
+						//-GHOST NODE DENSITY IS MIRRORED BACK TO THE BOUNDARY PARTICLES.
+						const float rhoghost = float(invacorr3.a11*rhopp1 + invacorr3.a12*gradrhopp1.x + invacorr3.a13*gradrhopp1.y + invacorr3.a14*gradrhopp1.z);
+						const float grx = -float(invacorr3.a21*rhopp1 + invacorr3.a22*gradrhopp1.x + invacorr3.a23*gradrhopp1.y + invacorr3.a24*gradrhopp1.z);
+						const float gry = -float(invacorr3.a31*rhopp1 + invacorr3.a32*gradrhopp1.x + invacorr3.a33*gradrhopp1.y + invacorr3.a34*gradrhopp1.z);
+						const float grz = -float(invacorr3.a41*rhopp1 + invacorr3.a42*gradrhopp1.x + invacorr3.a43*gradrhopp1.y + invacorr3.a44*gradrhopp1.z);
+						rhopfinal = (rhoghost + grx*dpos.x + gry*dpos.y + grz*dpos.z);
+					}
+					else if (a_corr3.a11>0) {//-Determinant is small but a11 is nonzero, 0th order ANGELO.
+						rhopfinal = float(rhopp1 / a_corr3.a11);
+					}
+					//-Ghost node velocity (0th order).
+					if (tslip != SLIP_Vel0) {
+						velrhopfinal.x = float(velp1.x / a_corr3.a11);
+						velrhopfinal.y = float(velp1.y / a_corr3.a11);
+						velrhopfinal.z = float(velp1.z / a_corr3.a11);
+					}
+				}
+				//-Store the results.
+				rhopfinal = (rhopfinal != FLT_MAX ? rhopfinal : CTE.rhopzero);
+				if (tslip == SLIP_Vel0) {//-DBC vel=0
+					velrhop[p1].w = rhopfinal;
+				}
+				if (tslip == SLIP_NoSlip) {//-No-Slip
+					const float3 v = motionvel[p1];
+					velrhop[p1] = make_float4(v.x + v.x - velrhopfinal.x, v.y + v.y - velrhopfinal.y, v.z + v.z - velrhopfinal.z, rhopfinal);
+				}
+				if (tslip == SLIP_FreeSlip) {//-No-Penetration and free slip    SHABA
+					float3 FSVelFinal; // final free slip boundary velocity
+					const float3 v = motionvel[p1];
+					float motion = sqrt(v.x*v.x + v.y*v.y + v.z*v.z); // to check if boundary moving
+					float norm = sqrt(bnormalp1.x*bnormalp1.x + bnormalp1.y*bnormalp1.y + bnormalp1.z*bnormalp1.z);
+					float3 normal; // creating a normailsed boundary normal
+					normal.x = fabs(bnormalp1.x) / norm; normal.y = fabs(bnormalp1.y) / norm; normal.z = fabs(bnormalp1.z) / norm;
+
+					// finding the velocity componants normal and tangential to boundary 
+					float3 normvel = make_float3(velrhopfinal.x*normal.x, velrhopfinal.y*normal.y, velrhopfinal.z*normal.z); // velocity in direction of normal pointin ginto fluid)
+					float3 tangvel = make_float3(velrhopfinal.x - normvel.x, velrhopfinal.y - normvel.y, velrhopfinal.z - normvel.z); // velocity tangential to normal
+
+					if (motion > 0) { // if moving boundary
+						float3 normmot = make_float3(v.x*normal.x, v.y*normal.y, v.z*normal.z); // boundary motion in direction normal to boundary 
+						FSVelFinal = make_float3(normmot.x + normmot.x - normvel.x, normmot.y + normmot.y - normvel.y, normmot.z + normmot.z - normvel.z);
+						// only velocity in normal direction for no-penetration
+						// fluid sees zero velocity in the tangetial direction
+					}
+					else {
+						FSVelFinal = make_float3(tangvel.x - normvel.x, tangvel.y - normvel.y, tangvel.z - normvel.z);
+						// tangential velocity equal to fluid velocity for free slip
+						// normal velocity reversed for no-penetration
+					}
+
+					// Save the velocity and density
+					velrhop[p1] = make_float4(FSVelFinal.x, FSVelFinal.y, FSVelFinal.z, rhopfinal);
+				}
+			}
+		}
+	}
+}
+//------------------------------------------------------------------------------
+/// Perform interaction between ghost node of selected bondary and domain particle for soil phase.
+//------------------------------------------------------------------------------
+template<TpKernel tker, bool sim2d, TpSlipMode tslip> __global__ void KerInteractionMdbcCorrectionNNGranular_Fast
+(unsigned n, unsigned nbound, float determlimit, float mdbcthreshold
+	, double3 mapposmin, float poscellsize, const float4 *poscell
+	, int scelldiv, int4 nc, int3 cellzero, const int2 *beginendcellfluid
+	, const double2 *posxy, const double *posz, const typecode *code, const unsigned *idp
+	, const float3 *boundnormal, const float3 *motionvel, float4 *velrhop,tsymatrix3f *sigma)
+{
+	const unsigned p1 = blockIdx.x*blockDim.x + threadIdx.x; //-Number of particle.
+	if (p1<n) {
+		const float3 bnormalp1 = boundnormal[p1];
+		if (bnormalp1.x != 0 || bnormalp1.y != 0 || bnormalp1.z != 0) {
+			float rhopfinal = FLT_MAX;
+			float3 velrhopfinal = make_float3(0, 0, 0);
+			tsymatrix3f sigmafinal = { 0,0,0,0,0,0 };//mdbr
+			float sumwab = 0;
+
+			//-Calculates ghost node position.
+			double3 gposp1 = make_double3(posxy[p1].x + bnormalp1.x, posxy[p1].y + bnormalp1.y, posz[p1] + bnormalp1.z);
+			gposp1 = (CTE.periactive != 0 ? cusph::KerUpdatePeriodicPos(gposp1) : gposp1); //-Corrected interface Position.
+			const float4 gpscellp1 = cusph::KerComputePosCell(gposp1, mapposmin, poscellsize);
+
+			//-Initializes variables for calculation.
+			float rhopp1 = 0;
+			float3 gradrhopp1 = make_float3(0, 0, 0);
+			//===== mdbr
+			//-Solid stress
+			tsymatrix3f sigmap1 = { 0,0,0,0,0,0 };//-First-order Stress value
+			float3 gradsigmaxxp1 = make_float3(0, 0, 0);//-Stress gradient
+			float3 gradsigmayyp1 = make_float3(0, 0, 0);
+			float3 gradsigmazzp1 = make_float3(0, 0, 0);
+			float3 gradsigmaxyp1 = make_float3(0, 0, 0);
+			float3 gradsigmayzp1 = make_float3(0, 0, 0);
+			float3 gradsigmaxzp1 = make_float3(0, 0, 0);
+			//=====
+			float3 velp1 = make_float3(0, 0, 0);                              // -Only for velocity
+			tmatrix3f a_corr2; if (sim2d) cumath::Tmatrix3fReset(a_corr2); //-Only for 2D.
+			tmatrix4f a_corr3; if (!sim2d)cumath::Tmatrix4fReset(a_corr3); //-Only for 3D.
+
+			//-Obtains neighborhood search limits.
+			int ini1, fin1, ini2, fin2, ini3, fin3;
+			cunsearch::InitCte(gposp1.x, gposp1.y, gposp1.z, scelldiv, nc, cellzero, ini1, fin1, ini2, fin2, ini3, fin3);
+
+			//-Boundary-Fluid interaction.
+			for (int c3 = ini3; c3<fin3; c3 += nc.w)for (int c2 = ini2; c2<fin2; c2 += nc.x) {
+				unsigned pini, pfin = 0;  cunsearch::ParticleRange(c2, c3, ini1, fin1, beginendcellfluid, pini, pfin);
+				if (pfin)for (unsigned p2 = pini; p2<pfin; p2++) {
+					const float4 pscellp2 = poscell[p2];
+					float drx = gpscellp1.x - pscellp2.x + CTE.poscellsize*(CEL_GetX(__float_as_int(gpscellp1.w)) - CEL_GetX(__float_as_int(pscellp2.w)));
+					float dry = gpscellp1.y - pscellp2.y + CTE.poscellsize*(CEL_GetY(__float_as_int(gpscellp1.w)) - CEL_GetY(__float_as_int(pscellp2.w)));
+					float drz = gpscellp1.z - pscellp2.z + CTE.poscellsize*(CEL_GetZ(__float_as_int(gpscellp1.w)) - CEL_GetZ(__float_as_int(pscellp2.w)));
+					const float rr2 = drx*drx + dry*dry + drz*drz;
+					const typecode pp2 = CODE_GetTypeValue(code[p2]); //<vs_non-Newtonian>
+					if (rr2 <= CTE.kernelsize2 && rr2 >= ALMOSTZERO && CODE_IsFluid(code[p2]) && pp2 == 1) {//-Only with domain particles in soil phase (including inout).
+						//-Computes kernel.
+						float fac;
+						const float wab = cufsph::GetKernel_WabFac<tker>(rr2, fac);
+						const float frx = fac*drx, fry = fac*dry, frz = fac*drz; //-Gradients.
+
+						//===== Get mass and volume of particle p2 =====
+						const float4 velrhopp2 = velrhop[p2];
+						//float massp2 = CTE.massf;
+
+
+						float massp2 = PHASEARRAY[pp2].mass; //-Contiene masa de particula segun sea bound o fluid.
+
+						const float volp2 = massp2 / velrhopp2.w;
+
+						//===== Density and its gradient =====
+						rhopp1 += massp2*wab;
+						gradrhopp1.x += massp2*frx;
+						gradrhopp1.y += massp2*fry;
+						gradrhopp1.z += massp2*frz;
+
+						//===== Kernel values multiplied by volume =====
+						const float vwab = wab*volp2;
+						sumwab += vwab;
+						const float vfrx = frx*volp2;
+						const float vfry = fry*volp2;
+						const float vfrz = frz*volp2;
+						//===== mdbr
+						//===== Stress value =====
+						sigmap1.xx += vwab*sigmap2.xx;
+						sigmap1.yy += vwab*sigmap2.yy;
+						sigmap1.zz += vwab*sigmap2.zz;
+						sigmap1.xy += vwab*sigmap2.xy;
+						sigmap1.yz += vwab*sigmap2.yz;
+						sigmap1.xz += vwab*sigmap2.xz;
+
+						//===== Stress gradient =====
+						//===== xx
+						gradsigmaxxp1.x += vfrx*sigmap2.xx;
+						gradsigmaxxp1.y += vfry*sigmap2.xx;
+						gradsigmaxxp1.z += vfrz*sigmap2.xx;
+						//===== yy
+						gradsigmayyp1.x += vfrx*sigmap2.yy;
+						gradsigmayyp1.y += vfry*sigmap2.yy;
+						gradsigmayyp1.z += vfrz*sigmap2.yy;
+						//===== zz
+						gradsigmazzp1.x += vfrx*sigmap2.zz;
+						gradsigmazzp1.y += vfry*sigmap2.zz;
+						gradsigmazzp1.z += vfrz*sigmap2.zz;
+						//===== xy
+						gradsigmaxyp1.x += vfrx*sigmap2.xy;
+						gradsigmaxyp1.y += vfry*sigmap2.xy;
+						gradsigmaxyp1.z += vfrz*sigmap2.xy;
+						//===== yz
+						gradsigmayzp1.x += vfrx*sigmap2.yz;
+						gradsigmayzp1.y += vfry*sigmap2.yz;
+						gradsigmayzp1.z += vfrz*sigmap2.yz;
+						//===== xz
+						gradsigmaxzp1.x += vfrx*sigmap2.xz;
+						gradsigmaxzp1.y += vfry*sigmap2.xz;
+						gradsigmaxzp1.z += vfrz*sigmap2.xz;
+						//===== End
+						//===== Velocity =====
+						if (tslip != SLIP_Vel0) {
+							velp1.x += vwab*velrhopp2.x;
+							velp1.y += vwab*velrhopp2.y;
+							velp1.z += vwab*velrhopp2.z;
+						}
+
+						//===== Matrix A for correction =====
+						if (sim2d) {
+							a_corr2.a11 += vwab;  a_corr2.a12 += drx*vwab;  a_corr2.a13 += drz*vwab;
+							a_corr2.a21 += vfrx;  a_corr2.a22 += drx*vfrx;  a_corr2.a23 += drz*vfrx;
+							a_corr2.a31 += vfrz;  a_corr2.a32 += drx*vfrz;  a_corr2.a33 += drz*vfrz;
+						}
+						else {
+							a_corr3.a11 += vwab;  a_corr3.a12 += drx*vwab;  a_corr3.a13 += dry*vwab;  a_corr3.a14 += drz*vwab;
+							a_corr3.a21 += vfrx;  a_corr3.a22 += drx*vfrx;  a_corr3.a23 += dry*vfrx;  a_corr3.a24 += drz*vfrx;
+							a_corr3.a31 += vfry;  a_corr3.a32 += drx*vfry;  a_corr3.a33 += dry*vfry;  a_corr3.a34 += drz*vfry;
+							a_corr3.a41 += vfrz;  a_corr3.a42 += drx*vfrz;  a_corr3.a43 += dry*vfrz;  a_corr3.a44 += drz*vfrz;
+						}
+					}
+				}
+			}
+
+			//-Store the results.
+			//--------------------
+			if (sumwab >= mdbcthreshold) {
+				const float3 dpos = make_float3(-bnormalp1.x, -bnormalp1.y, -bnormalp1.z); //-Boundary particle position - ghost node position.
+				if (sim2d) {
+					const double determ = cumath::Determinant3x3dbl(a_corr2);
+					if (fabs(determ) >= determlimit) {//-Use 1e-3f (first_order) or 1e+3f (zeroth_order).
+						const tmatrix3f invacorr2 = cumath::InverseMatrix3x3dbl(a_corr2, determ);
+						//-GHOST NODE DENSITY IS MIRRORED BACK TO THE BOUNDARY PARTICLES.
+						const float rhoghost = float(invacorr2.a11*rhopp1 + invacorr2.a12*gradrhopp1.x + invacorr2.a13*gradrhopp1.z);
+						const float grx = -float(invacorr2.a21*rhopp1 + invacorr2.a22*gradrhopp1.x + invacorr2.a23*gradrhopp1.z);
+						const float grz = -float(invacorr2.a31*rhopp1 + invacorr2.a32*gradrhopp1.x + invacorr2.a33*gradrhopp1.z);
+						rhopfinal = (rhoghost + grx*dpos.x + grz*dpos.z);
+						//-Ghost stress ==== mdbr
+						//-xx
+						const float sigmaxxg = float(invacorr2.a11*sigmap1.xx + invacorr2.a12*gradsigmaxxp1.x + invacorr2.a13*gradsigmaxxp1.z);
+						const float sixxgrx = -float(invacorr2.a21*sigmap1.xx + invacorr2.a22*gradsigmaxxp1.x + invacorr2.a23*gradsigmaxxp1.z);
+						const float sixxgrz = -float(invacorr2.a31*sigmap1.xx + invacorr2.a32*gradsigmaxxp1.x + invacorr2.a33*gradsigmaxxp1.z);
+						//-zz
+						const float sigmazzg = float(invacorr2.a11*sigmap1.zz + invacorr2.a12*gradsigmazzp1.x + invacorr2.a13*gradsigmazzp1.z);
+						const float sizzgrx = -float(invacorr2.a21*sigmap1.zz + invacorr2.a22*gradsigmazzp1.x + invacorr2.a23*gradsigmazzp1.z);
+						const float sizzgrz = -float(invacorr2.a31*sigmap1.zz + invacorr2.a32*gradsigmazzp1.x + invacorr2.a33*gradsigmazzp1.z);
+						//-xz
+						const float sigmaxzg = float(invacorr2.a11*sigmap1.xz + invacorr2.a12*gradsigmaxzp1.x + invacorr2.a13*gradsigmaxzp1.z);
+						const float sixzgrx = -float(invacorr2.a21*sigmap1.xz + invacorr2.a22*gradsigmaxzp1.x + invacorr2.a23*gradsigmaxzp1.z);
+						const float sixzgrz = -float(invacorr2.a31*sigmap1.xz + invacorr2.a32*gradsigmaxzp1.x + invacorr2.a33*gradsigmaxzp1.z);
+						//-Final stress
+						sigmafinal.xx = sigmaxxg + sixxgrx*dpos.x + sixxgrz*dpos.z;
+						sigmafinal.zz = sigmazzg + sizzgrx*dpos.x + sizzgrz*dpos.z;
+						sigmafinal.xz = sigmaxzg + sixzgrx*dpos.x + sixzgrz*dpos.z;
+						//=====
+					}
+					else if (a_corr2.a11>0) {//-Determinant is small but a11 is nonzero, 0th order ANGELO.
+						rhopfinal = float(rhopp1 / a_corr2.a11);
+						//====mdbr
+						sigmafinal.xx = float(sigmap1.xx / a_corr2.a11);
+						sigmafinal.zz = float(sigmap1.zz / a_corr2.a11);
+						sigmafinal.xz = float(sigmap1.xz / a_corr2.a11);
+					}
+					//-Ghost node velocity (0th order).
+					if (tslip != SLIP_Vel0) {
+						velrhopfinal.x = float(velp1.x / a_corr2.a11);
+						velrhopfinal.z = float(velp1.z / a_corr2.a11);
+						velrhopfinal.y = 0;
+					}
+				}
+				else {
+					const double determ = cumath::Determinant4x4dbl(a_corr3);
+					if (fabs(determ) >= determlimit) {
+						const tmatrix4f invacorr3 = cumath::InverseMatrix4x4dbl(a_corr3, determ);
+						//-GHOST NODE DENSITY IS MIRRORED BACK TO THE BOUNDARY PARTICLES.
+						const float rhoghost = float(invacorr3.a11*rhopp1 + invacorr3.a12*gradrhopp1.x + invacorr3.a13*gradrhopp1.y + invacorr3.a14*gradrhopp1.z);
+						const float grx = -float(invacorr3.a21*rhopp1 + invacorr3.a22*gradrhopp1.x + invacorr3.a23*gradrhopp1.y + invacorr3.a24*gradrhopp1.z);
+						const float gry = -float(invacorr3.a31*rhopp1 + invacorr3.a32*gradrhopp1.x + invacorr3.a33*gradrhopp1.y + invacorr3.a34*gradrhopp1.z);
+						const float grz = -float(invacorr3.a41*rhopp1 + invacorr3.a42*gradrhopp1.x + invacorr3.a43*gradrhopp1.y + invacorr3.a44*gradrhopp1.z);
+						rhopfinal = (rhoghost + grx*dpos.x + gry*dpos.y + grz*dpos.z);
+						//-Ghost stress ==== mdbr
+						//-xx
+						const float sigmaxxg = float(invacorr3.a11*sigmap1.xx + invacorr3.a12*gradsigmaxxp1.x + invacorr3.a13*gradsigmaxxp1.y + invacorr3.a14*gradsigmaxxp1.z);
+						const float sixxgrx = -float(invacorr3.a21*sigmap1.xx + invacorr3.a22*gradsigmaxxp1.x + invacorr3.a23*gradsigmaxxp1.y + invacorr3.a24*gradsigmaxxp1.z);
+						const float sixxgry = -float(invacorr3.a31*sigmap1.xx + invacorr3.a32*gradsigmaxxp1.x + invacorr3.a33*gradsigmaxxp1.y + invacorr3.a34*gradsigmaxxp1.z);
+						const float sixxgrz = -float(invacorr3.a41*sigmap1.xx + invacorr3.a42*gradsigmaxxp1.x + invacorr3.a43*gradsigmaxxp1.y + invacorr3.a44*gradsigmaxxp1.z);
+						//-yy
+						const float sigmayyg = float(invacorr3.a11*sigmap1.yy + invacorr3.a12*gradsigmayyp1.x + invacorr3.a13*gradsigmayyp1.y + invacorr3.a14*gradsigmayyp1.z);
+						const float siyygrx = -float(invacorr3.a21*sigmap1.yy + invacorr3.a22*gradsigmayyp1.x + invacorr3.a23*gradsigmayyp1.y + invacorr3.a24*gradsigmayyp1.z);
+						const float siyygry = -float(invacorr3.a31*sigmap1.yy + invacorr3.a32*gradsigmayyp1.x + invacorr3.a33*gradsigmayyp1.y + invacorr3.a34*gradsigmayyp1.z);
+						const float siyygrz = -float(invacorr3.a41*sigmap1.yy + invacorr3.a42*gradsigmayyp1.x + invacorr3.a43*gradsigmayyp1.y + invacorr3.a44*gradsigmayyp1.z);
+						//-zz
+						const float sigmazzg = float(invacorr3.a11*sigmap1.zz + invacorr3.a12*gradsigmazzp1.x + invacorr3.a13*gradsigmazzp1.y + invacorr3.a14*gradsigmazzp1.z);
+						const float sizzgrx = -float(invacorr3.a21*sigmap1.zz + invacorr3.a22*gradsigmazzp1.x + invacorr3.a23*gradsigmazzp1.y + invacorr3.a24*gradsigmazzp1.z);
+						const float sizzgry = -float(invacorr3.a31*sigmap1.zz + invacorr3.a32*gradsigmazzp1.x + invacorr3.a33*gradsigmazzp1.y + invacorr3.a34*gradsigmazzp1.z);
+						const float sizzgrz = -float(invacorr3.a41*sigmap1.zz + invacorr3.a42*gradsigmazzp1.x + invacorr3.a43*gradsigmazzp1.y + invacorr3.a44*gradsigmazzp1.z);
+						//-xy
+						const float sigmaxyg = float(invacorr3.a11*sigmap1.xy + invacorr3.a12*gradsigmaxyp1.x + invacorr3.a13*gradsigmaxyp1.y + invacorr3.a14*gradsigmaxyp1.z);
+						const float sixygrx = -float(invacorr3.a21*sigmap1.xy + invacorr3.a22*gradsigmaxyp1.x + invacorr3.a23*gradsigmaxyp1.y + invacorr3.a24*gradsigmaxyp1.z);
+						const float sixygry = -float(invacorr3.a31*sigmap1.xy + invacorr3.a32*gradsigmaxyp1.x + invacorr3.a33*gradsigmaxyp1.y + invacorr3.a34*gradsigmaxyp1.z);
+						const float sixygrz = -float(invacorr3.a41*sigmap1.xy + invacorr3.a42*gradsigmaxyp1.x + invacorr3.a43*gradsigmaxyp1.y + invacorr3.a44*gradsigmaxyp1.z);
+						//-yz
+						const float sigmayzg = float(invacorr3.a11*sigmap1.yz + invacorr3.a12*gradsigmayzp1.x + invacorr3.a13*gradsigmayzp1.y + invacorr3.a14*gradsigmayzp1.z);
+						const float siyzgrx = -float(invacorr3.a21*sigmap1.yz + invacorr3.a22*gradsigmayzp1.x + invacorr3.a23*gradsigmayzp1.y + invacorr3.a24*gradsigmayzp1.z);
+						const float siyzgry = -float(invacorr3.a31*sigmap1.yz + invacorr3.a32*gradsigmayzp1.x + invacorr3.a33*gradsigmayzp1.y + invacorr3.a34*gradsigmayzp1.z);
+						const float siyzgrz = -float(invacorr3.a41*sigmap1.yz + invacorr3.a42*gradsigmayzp1.x + invacorr3.a43*gradsigmayzp1.y + invacorr3.a44*gradsigmayzp1.z);
+						//-xz
+						const float sigmaxzg = float(invacorr3.a11*sigmap1.xz + invacorr3.a12*gradsigmaxzp1.x + invacorr3.a13*gradsigmaxzp1.y + invacorr3.a14*gradsigmaxzp1.z);
+						const float sixzgrx = -float(invacorr3.a21*sigmap1.xz + invacorr3.a22*gradsigmaxzp1.x + invacorr3.a23*gradsigmaxzp1.y + invacorr3.a24*gradsigmaxzp1.z);
+						const float sixzgry = -float(invacorr3.a31*sigmap1.xz + invacorr3.a32*gradsigmaxzp1.x + invacorr3.a33*gradsigmaxzp1.y + invacorr3.a34*gradsigmaxzp1.z);
+						const float sixzgrz = -float(invacorr3.a41*sigmap1.xz + invacorr3.a42*gradsigmaxzp1.x + invacorr3.a43*gradsigmaxzp1.y + invacorr3.a44*gradsigmaxzp1.z);
+						//-Final stress
+						sigmafinal.xx = sigmaxxg + sixxgrx*dpos.x + sixxgry*dpos.y + sixxgrz*dpos.z;
+						sigmafinal.yy = sigmayyg + siyygrx*dpos.x + siyygry*dpos.y + siyygrz*dpos.z;
+						sigmafinal.zz = sigmazzg + sizzgrx*dpos.x + sizzgry*dpos.y + sizzgrz*dpos.z;
+						sigmafinal.xy = sigmaxyg + sixygrx*dpos.x + sixygry*dpos.y + sixygrz*dpos.z;
+						sigmafinal.yz = sigmayzg + siyzgrx*dpos.x + siyzgry*dpos.y + siyzgrz*dpos.z;
+						sigmafinal.xz = sigmaxzg + sixzgrx*dpos.x + sixzgry*dpos.y + sixzgrz*dpos.z;
+					}
+					else if (a_corr3.a11>0) {//-Determinant is small but a11 is nonzero, 0th order ANGELO.
+						rhopfinal = float(rhopp1 / a_corr3.a11);
+						//==== mdbr
+						sigmafinal.xx = float(sigmap1.xx / a_corr3.a11);
+						sigmafinal.yy = float(sigmap1.yy / a_corr3.a11);
+						sigmafinal.zz = float(sigmap1.zz / a_corr3.a11);
+						sigmafinal.xy = float(sigmap1.xy / a_corr3.a11);
+						sigmafinal.yz = float(sigmap1.yz / a_corr3.a11);
+						sigmafinal.xz = float(sigmap1.xz / a_corr3.a11);
+					}
+					//-Ghost node velocity (0th order).
+					if (tslip != SLIP_Vel0) {
+						velrhopfinal.x = float(velp1.x / a_corr3.a11);
+						velrhopfinal.y = float(velp1.y / a_corr3.a11);
+						velrhopfinal.z = float(velp1.z / a_corr3.a11);
+					}
+				}
+				//-Store the results.
+				rhopfinal = (rhopfinal != FLT_MAX ? rhopfinal : CTE.rhopzero);
+				if (tslip == SLIP_Vel0) {//-DBC vel=0
+					velrhop[p1].w = rhopfinal;
+					sigma[p1] = sigmafinal;//mdbr
+				}
+				if (tslip == SLIP_NoSlip) {//-No-Slip
+					const float3 v = motionvel[p1];
+					velrhop[p1] = make_float4(v.x + v.x - velrhopfinal.x, v.y + v.y - velrhopfinal.y, v.z + v.z - velrhopfinal.z, rhopfinal);
+					sigma[p1] = sigmafinal;//mdbr
+				}
+				if (tslip == SLIP_FreeSlip) {//-No-Penetration and free slip    SHABA
+					float3 FSVelFinal; // final free slip boundary velocity
+					const float3 v = motionvel[p1];
+					float motion = sqrt(v.x*v.x + v.y*v.y + v.z*v.z); // to check if boundary moving
+					float norm = sqrt(bnormalp1.x*bnormalp1.x + bnormalp1.y*bnormalp1.y + bnormalp1.z*bnormalp1.z);
+					float3 normal; // creating a normailsed boundary normal
+					normal.x = fabs(bnormalp1.x) / norm; normal.y = fabs(bnormalp1.y) / norm; normal.z = fabs(bnormalp1.z) / norm;
+
+					// finding the velocity componants normal and tangential to boundary 
+					float3 normvel = make_float3(velrhopfinal.x*normal.x, velrhopfinal.y*normal.y, velrhopfinal.z*normal.z); // velocity in direction of normal pointin ginto fluid)
+					float3 tangvel = make_float3(velrhopfinal.x - normvel.x, velrhopfinal.y - normvel.y, velrhopfinal.z - normvel.z); // velocity tangential to normal
+
+					if (motion > 0) { // if moving boundary
+						float3 normmot = make_float3(v.x*normal.x, v.y*normal.y, v.z*normal.z); // boundary motion in direction normal to boundary 
+						FSVelFinal = make_float3(normmot.x + normmot.x - normvel.x, normmot.y + normmot.y - normvel.y, normmot.z + normmot.z - normvel.z);
+						// only velocity in normal direction for no-penetration
+						// fluid sees zero velocity in the tangetial direction
+					}
+					else {
+						FSVelFinal = make_float3(tangvel.x - normvel.x, tangvel.y - normvel.y, tangvel.z - normvel.z);
+						// tangential velocity equal to fluid velocity for free slip
+						// normal velocity reversed for no-penetration
+					}
+
+					// Save the velocity and density
+					velrhop[p1] = make_float4(FSVelFinal.x, FSVelFinal.y, FSVelFinal.z, rhopfinal);
+					sigma[p1] = sigmafinal;//mdbr
+				}
+			}
+		}
+	}
+}
+//------------------------------------------------------------------------------
+/// Perform interaction between ghost node of selected bondary and domain particle for water phase.
+//------------------------------------------------------------------------------
+template<TpKernel tker, bool sim2d, TpSlipMode tslip> __global__ void KerInteractionMdbcCorrectionNNFluid_Dbl
+(unsigned n, unsigned nbound, float determlimit, float mdbcthreshold
+	, int scelldiv, int4 nc, int3 cellzero, const int2 *beginendcellfluid
+	, const double2 *posxy, const double *posz, const typecode *code, const unsigned *idp
+	, const float3 *boundnormal, const float3 *motionvel, float4 *velrhop)
+{
+	const unsigned p1 = blockIdx.x*blockDim.x + threadIdx.x; //-Number of particle.
+	if (p1<n) {
+		const float3 bnormalp1 = boundnormal[p1];
+		if (bnormalp1.x != 0 || bnormalp1.y != 0 || bnormalp1.z != 0) {
+			float rhopfinal = FLT_MAX;
+			float3 velrhopfinal = make_float3(0, 0, 0);
+			float sumwab = 0;
+
+			//-Calculates ghost node position.
+			double3 gposp1 = make_double3(posxy[p1].x + bnormalp1.x, posxy[p1].y + bnormalp1.y, posz[p1] + bnormalp1.z);
+			gposp1 = (CTE.periactive != 0 ? cusph::KerUpdatePeriodicPos(gposp1) : gposp1); //-Corrected interface Position.
+																						   //-Initializes variables for calculation.
+			float rhopp1 = 0;
+			float3 gradrhopp1 = make_float3(0, 0, 0);
+			float3 velp1 = make_float3(0, 0, 0);                              // -Only for velocity
+			tmatrix3d a_corr2; if (sim2d) cumath::Tmatrix3dReset(a_corr2); //-Only for 2D.
+			tmatrix4d a_corr3; if (!sim2d)cumath::Tmatrix4dReset(a_corr3); //-Only for 3D.
+
+																		   //-Obtains neighborhood search limits.
+			int ini1, fin1, ini2, fin2, ini3, fin3;
+			cunsearch::InitCte(gposp1.x, gposp1.y, gposp1.z, scelldiv, nc, cellzero, ini1, fin1, ini2, fin2, ini3, fin3);
+
+			//-Boundary-Fluid interaction.
+			for (int c3 = ini3; c3<fin3; c3 += nc.w)for (int c2 = ini2; c2<fin2; c2 += nc.x) {
+				unsigned pini, pfin = 0;  cunsearch::ParticleRange(c2, c3, ini1, fin1, beginendcellfluid, pini, pfin);
+				if (pfin)for (unsigned p2 = pini; p2<pfin; p2++) {
+					const double2 p2xy = posxy[p2];
+					const float drx = float(gposp1.x - p2xy.x);
+					const float dry = float(gposp1.y - p2xy.y);
+					const float drz = float(gposp1.z - posz[p2]);
+					const float rr2 = drx*drx + dry*dry + drz*drz;
+					const typecode pp2 = CODE_GetTypeValue(code[p2]); //<vs_non-Newtonian>
+					if (rr2 <= CTE.kernelsize2 && rr2 >= ALMOSTZERO && CODE_IsFluid(code[p2])&&pp2==0) {//-Only with domain particles in water phase (including inout).
+						//-Computes kernel.
+						float fac;
+						const float wab = cufsph::GetKernel_WabFac<tker>(rr2, fac);
+						const float frx = fac*drx, fry = fac*dry, frz = fac*drz; //-Gradients.
+
+						//===== Get mass and volume of particle p2 =====
+						const float4 velrhopp2 = velrhop[p2];
+						float massp2 = PHASEARRAY[pp2].mass; //-Contiene masa de particula segun sea bound o fluid.
+
+						//float massp2=CTE.massf;
+						const float volp2 = massp2 / velrhopp2.w;
+
+						//===== Density and its gradient =====
+						rhopp1 += massp2*wab;
+						gradrhopp1.x += massp2*frx;
+						gradrhopp1.y += massp2*fry;
+						gradrhopp1.z += massp2*frz;
+
+						//===== Kernel values multiplied by volume =====
+						const float vwab = wab*volp2;
+						sumwab += vwab;
+						const float vfrx = frx*volp2;
+						const float vfry = fry*volp2;
+						const float vfrz = frz*volp2;
+
+						//===== Velocity =====
+						if (tslip != SLIP_Vel0) {
+							velp1.x += vwab*velrhopp2.x;
+							velp1.y += vwab*velrhopp2.y;
+							velp1.z += vwab*velrhopp2.z;
+						}
+
+						//===== Matrix A for correction =====
+						if (sim2d) {
+							a_corr2.a11 += vwab;  a_corr2.a12 += drx*vwab;  a_corr2.a13 += drz*vwab;
+							a_corr2.a21 += vfrx;  a_corr2.a22 += drx*vfrx;  a_corr2.a23 += drz*vfrx;
+							a_corr2.a31 += vfrz;  a_corr2.a32 += drx*vfrz;  a_corr2.a33 += drz*vfrz;
+						}
+						else {
+							a_corr3.a11 += vwab;  a_corr3.a12 += drx*vwab;  a_corr3.a13 += dry*vwab;  a_corr3.a14 += drz*vwab;
+							a_corr3.a21 += vfrx;  a_corr3.a22 += drx*vfrx;  a_corr3.a23 += dry*vfrx;  a_corr3.a24 += drz*vfrx;
+							a_corr3.a31 += vfry;  a_corr3.a32 += drx*vfry;  a_corr3.a33 += dry*vfry;  a_corr3.a34 += drz*vfry;
+							a_corr3.a41 += vfrz;  a_corr3.a42 += drx*vfrz;  a_corr3.a43 += dry*vfrz;  a_corr3.a44 += drz*vfrz;
+						}
+					}
+				}
+			}
+
+			//-Store the results.
+			//--------------------
+			if (sumwab >= mdbcthreshold) {
+				const float3 dpos = make_float3(-bnormalp1.x, -bnormalp1.y, -bnormalp1.z); //-Boundary particle position - ghost node position.
+				if (sim2d) {
+					const double determ = cumath::Determinant3x3(a_corr2);
+					if (fabs(determ) >= determlimit) {//-Use 1e-3f (first_order) or 1e+3f (zeroth_order).
+						const tmatrix3d invacorr2 = cumath::InverseMatrix3x3(a_corr2, determ);
+						//-GHOST NODE DENSITY IS MIRRORED BACK TO THE BOUNDARY PARTICLES.
+						const float rhoghost = float(invacorr2.a11*rhopp1 + invacorr2.a12*gradrhopp1.x + invacorr2.a13*gradrhopp1.z);
+						const float grx = -float(invacorr2.a21*rhopp1 + invacorr2.a22*gradrhopp1.x + invacorr2.a23*gradrhopp1.z);
+						const float grz = -float(invacorr2.a31*rhopp1 + invacorr2.a32*gradrhopp1.x + invacorr2.a33*gradrhopp1.z);
+						rhopfinal = (rhoghost + grx*dpos.x + grz*dpos.z);
+					}
+					else if (a_corr2.a11>0) {//-Determinant is small but a11 is nonzero, 0th order ANGELO.
+						rhopfinal = float(rhopp1 / a_corr2.a11);
+					}
+					//-Ghost node velocity (0th order).
+					if (tslip != SLIP_Vel0) {
+						velrhopfinal.x = float(velp1.x / a_corr2.a11);
+						velrhopfinal.z = float(velp1.z / a_corr2.a11);
+						velrhopfinal.y = 0;
+					}
+				}
+				else {
+					const double determ = cumath::Determinant4x4(a_corr3);
+					if (fabs(determ) >= determlimit) {
+						const tmatrix4d invacorr3 = cumath::InverseMatrix4x4(a_corr3, determ);
+						//-GHOST NODE DENSITY IS MIRRORED BACK TO THE BOUNDARY PARTICLES.
+						const float rhoghost = float(invacorr3.a11*rhopp1 + invacorr3.a12*gradrhopp1.x + invacorr3.a13*gradrhopp1.y + invacorr3.a14*gradrhopp1.z);
+						const float grx = -float(invacorr3.a21*rhopp1 + invacorr3.a22*gradrhopp1.x + invacorr3.a23*gradrhopp1.y + invacorr3.a24*gradrhopp1.z);
+						const float gry = -float(invacorr3.a31*rhopp1 + invacorr3.a32*gradrhopp1.x + invacorr3.a33*gradrhopp1.y + invacorr3.a34*gradrhopp1.z);
+						const float grz = -float(invacorr3.a41*rhopp1 + invacorr3.a42*gradrhopp1.x + invacorr3.a43*gradrhopp1.y + invacorr3.a44*gradrhopp1.z);
+						rhopfinal = (rhoghost + grx*dpos.x + gry*dpos.y + grz*dpos.z);
+					}
+					else if (a_corr3.a11>0) {//-Determinant is small but a11 is nonzero, 0th order ANGELO.
+						rhopfinal = float(rhopp1 / a_corr3.a11);
+					}
+					//-Ghost node velocity (0th order).
+					if (tslip != SLIP_Vel0) {
+						velrhopfinal.x = float(velp1.x / a_corr3.a11);
+						velrhopfinal.y = float(velp1.y / a_corr3.a11);
+						velrhopfinal.z = float(velp1.z / a_corr3.a11);
+					}
+				}
+				//-Store the results.
+				rhopfinal = (rhopfinal != FLT_MAX ? rhopfinal : CTE.rhopzero);
+				if (tslip == SLIP_Vel0) {//-DBC vel=0
+					velrhop[p1].w = rhopfinal;
+				}
+				if (tslip == SLIP_NoSlip) {//-No-Slip
+					const float3 v = motionvel[p1];
+					velrhop[p1] = make_float4(v.x + v.x - velrhopfinal.x, v.y + v.y - velrhopfinal.y, v.z + v.z - velrhopfinal.z, rhopfinal);
+				}
+				if (tslip == SLIP_FreeSlip) {//-No-Penetration and free slip    SHABA
+					float3 FSVelFinal; // final free slip boundary velocity
+					const float3 v = motionvel[p1];
+					float motion = sqrt(v.x*v.x + v.y*v.y + v.z*v.z); // to check if boundary moving
+					float norm = sqrt(bnormalp1.x*bnormalp1.x + bnormalp1.y*bnormalp1.y + bnormalp1.z*bnormalp1.z);
+					float3 normal; // creating a normailsed boundary normal
+					normal.x = fabs(bnormalp1.x) / norm; normal.y = fabs(bnormalp1.y) / norm; normal.z = fabs(bnormalp1.z) / norm;
+
+					// finding the velocity componants normal and tangential to boundary 
+					float3 normvel = make_float3(velrhopfinal.x*normal.x, velrhopfinal.y*normal.y, velrhopfinal.z*normal.z); // velocity in direction of normal pointin ginto fluid)
+					float3 tangvel = make_float3(velrhopfinal.x - normvel.x, velrhopfinal.y - normvel.y, velrhopfinal.z - normvel.z); // velocity tangential to normal
+
+					if (motion > 0) { // if moving boundary
+						float3 normmot = make_float3(v.x*normal.x, v.y*normal.y, v.z*normal.z); // boundary motion in direction normal to boundary 
+						FSVelFinal = make_float3(normmot.x + normmot.x - normvel.x, normmot.y + normmot.y - normvel.y, normmot.z + normmot.z - normvel.z);
+						// only velocity in normal direction for no-penetration
+						// fluid sees zero velocity in the tangetial direction
+					}
+					else {
+						FSVelFinal = make_float3(tangvel.x - normvel.x, tangvel.y - normvel.y, tangvel.z - normvel.z);
+						// tangential velocity equal to fluid velocity for free slip
+						// normal velocity reversed for no-penetration
+					}
+
+					// Save the velocity and density
+					velrhop[p1] = make_float4(FSVelFinal.x, FSVelFinal.y, FSVelFinal.z, rhopfinal);
+				}
+			}
+		}
+	}
+}
+
+//------------------------------------------------------------------------------
+/// Perform interaction between ghost node of selected bondary and domain particle for soil phase.
+//------------------------------------------------------------------------------
+template<TpKernel tker, bool sim2d, TpSlipMode tslip> __global__ void KerInteractionMdbcCorrectionNNGranular_Dbl
+(unsigned n, unsigned nbound, float determlimit, float mdbcthreshold
+	, int scelldiv, int4 nc, int3 cellzero, const int2 *beginendcellfluid
+	, const double2 *posxy, const double *posz, const typecode *code, const unsigned *idp
+	, const float3 *boundnormal, const float3 *motionvel, float4 *velrhop,tsymatrix3f *sigma)
+{
+	const unsigned p1 = blockIdx.x*blockDim.x + threadIdx.x; //-Number of particle.
+	if (p1<n) {
+		const float3 bnormalp1 = boundnormal[p1];
+		if (bnormalp1.x != 0 || bnormalp1.y != 0 || bnormalp1.z != 0) {
+			float rhopfinal = FLT_MAX;
+			float3 velrhopfinal = make_float3(0, 0, 0);
+			tsymatrix3f sigmafinal = { 0,0,0,0,0,0 };//mdbr
+			float sumwab = 0;
+
+			//-Calculates ghost node position.
+			double3 gposp1 = make_double3(posxy[p1].x + bnormalp1.x, posxy[p1].y + bnormalp1.y, posz[p1] + bnormalp1.z);
+			gposp1 = (CTE.periactive != 0 ? cusph::KerUpdatePeriodicPos(gposp1) : gposp1); //-Corrected interface Position.
+																						   //-Initializes variables for calculation.
+			float rhopp1 = 0;
+			float3 gradrhopp1 = make_float3(0, 0, 0);
+			//===== mdbr
+			//-Solid stress
+			tsymatrix3f sigmap1 = { 0,0,0,0,0,0 };//-First-order Stress value
+			float3 gradsigmaxxp1 = make_float3(0, 0, 0);//-Stress gradient
+			float3 gradsigmayyp1 = make_float3(0, 0, 0);
+			float3 gradsigmazzp1 = make_float3(0, 0, 0);
+			float3 gradsigmaxyp1 = make_float3(0, 0, 0);
+			float3 gradsigmayzp1 = make_float3(0, 0, 0);
+			float3 gradsigmaxzp1 = make_float3(0, 0, 0);
+			//=====
+			float3 velp1 = make_float3(0, 0, 0);                              // -Only for velocity
+			tmatrix3d a_corr2; if (sim2d) cumath::Tmatrix3dReset(a_corr2); //-Only for 2D.
+			tmatrix4d a_corr3; if (!sim2d)cumath::Tmatrix4dReset(a_corr3); //-Only for 3D.
+
+																		   //-Obtains neighborhood search limits.
+			int ini1, fin1, ini2, fin2, ini3, fin3;
+			cunsearch::InitCte(gposp1.x, gposp1.y, gposp1.z, scelldiv, nc, cellzero, ini1, fin1, ini2, fin2, ini3, fin3);
+
+			//-Boundary-Fluid interaction.
+			for (int c3 = ini3; c3<fin3; c3 += nc.w)for (int c2 = ini2; c2<fin2; c2 += nc.x) {
+				unsigned pini, pfin = 0;  cunsearch::ParticleRange(c2, c3, ini1, fin1, beginendcellfluid, pini, pfin);
+				if (pfin)for (unsigned p2 = pini; p2<pfin; p2++) {
+					const double2 p2xy = posxy[p2];
+					const float drx = float(gposp1.x - p2xy.x);
+					const float dry = float(gposp1.y - p2xy.y);
+					const float drz = float(gposp1.z - posz[p2]);
+					const float rr2 = drx*drx + dry*dry + drz*drz;
+					const typecode pp2 = CODE_GetTypeValue(code[p2]); //<vs_non-Newtonian>
+					if (rr2 <= CTE.kernelsize2 && rr2 >= ALMOSTZERO && CODE_IsFluid(code[p2]) && pp2 == 1) {//-Only with domain particles in soil phase (including inout).
+						//-Computes kernel.
+						float fac;
+						const float wab = cufsph::GetKernel_WabFac<tker>(rr2, fac);
+						const float frx = fac*drx, fry = fac*dry, frz = fac*drz; //-Gradients.
+
+						//===== Get mass and volume of particle p2 =====
+						const float4 velrhopp2 = velrhop[p2];
+						float massp2 = PHASEARRAY[pp2].mass; //-Contiene masa de particula segun sea bound o fluid.
+						const tsymatrix3f sigmap2 = sigma[p2];//mdbr
+						//float massp2=CTE.massf;
+						const float volp2 = massp2 / velrhopp2.w;
+
+						//===== Density and its gradient =====
+						rhopp1 += massp2*wab;
+						gradrhopp1.x += massp2*frx;
+						gradrhopp1.y += massp2*fry;
+						gradrhopp1.z += massp2*frz;
+
+						//===== Kernel values multiplied by volume =====
+						const float vwab = wab*volp2;
+						sumwab += vwab;
+						const float vfrx = frx*volp2;
+						const float vfry = fry*volp2;
+						const float vfrz = frz*volp2;
+						//===== mdbr
+						//===== Stress value =====
+						sigmap1.xx += vwab*sigmap2.xx;
+						sigmap1.yy += vwab*sigmap2.yy;
+						sigmap1.zz += vwab*sigmap2.zz;
+						sigmap1.xy += vwab*sigmap2.xy;
+						sigmap1.yz += vwab*sigmap2.yz;
+						sigmap1.xz += vwab*sigmap2.xz;
+
+						//===== Stress gradient =====
+						//===== xx
+						gradsigmaxxp1.x += vfrx*sigmap2.xx;
+						gradsigmaxxp1.y += vfry*sigmap2.xx;
+						gradsigmaxxp1.z += vfrz*sigmap2.xx;
+						//===== yy
+						gradsigmayyp1.x += vfrx*sigmap2.yy;
+						gradsigmayyp1.y += vfry*sigmap2.yy;
+						gradsigmayyp1.z += vfrz*sigmap2.yy;
+						//===== zz
+						gradsigmazzp1.x += vfrx*sigmap2.zz;
+						gradsigmazzp1.y += vfry*sigmap2.zz;
+						gradsigmazzp1.z += vfrz*sigmap2.zz;
+						//===== xy
+						gradsigmaxyp1.x += vfrx*sigmap2.xy;
+						gradsigmaxyp1.y += vfry*sigmap2.xy;
+						gradsigmaxyp1.z += vfrz*sigmap2.xy;
+						//===== yz
+						gradsigmayzp1.x += vfrx*sigmap2.yz;
+						gradsigmayzp1.y += vfry*sigmap2.yz;
+						gradsigmayzp1.z += vfrz*sigmap2.yz;
+						//===== xz
+						gradsigmaxzp1.x += vfrx*sigmap2.xz;
+						gradsigmaxzp1.y += vfry*sigmap2.xz;
+						gradsigmaxzp1.z += vfrz*sigmap2.xz;
+						//===== End
+						//===== Velocity =====
+						if (tslip != SLIP_Vel0) {
+							velp1.x += vwab*velrhopp2.x;
+							velp1.y += vwab*velrhopp2.y;
+							velp1.z += vwab*velrhopp2.z;
+						}
+
+						//===== Matrix A for correction =====
+						if (sim2d) {
+							a_corr2.a11 += vwab;  a_corr2.a12 += drx*vwab;  a_corr2.a13 += drz*vwab;
+							a_corr2.a21 += vfrx;  a_corr2.a22 += drx*vfrx;  a_corr2.a23 += drz*vfrx;
+							a_corr2.a31 += vfrz;  a_corr2.a32 += drx*vfrz;  a_corr2.a33 += drz*vfrz;
+						}
+						else {
+							a_corr3.a11 += vwab;  a_corr3.a12 += drx*vwab;  a_corr3.a13 += dry*vwab;  a_corr3.a14 += drz*vwab;
+							a_corr3.a21 += vfrx;  a_corr3.a22 += drx*vfrx;  a_corr3.a23 += dry*vfrx;  a_corr3.a24 += drz*vfrx;
+							a_corr3.a31 += vfry;  a_corr3.a32 += drx*vfry;  a_corr3.a33 += dry*vfry;  a_corr3.a34 += drz*vfry;
+							a_corr3.a41 += vfrz;  a_corr3.a42 += drx*vfrz;  a_corr3.a43 += dry*vfrz;  a_corr3.a44 += drz*vfrz;
+						}
+					}
+				}
+			}
+
+			//-Store the results.
+			//--------------------
+			if (sumwab >= mdbcthreshold) {
+				const float3 dpos = make_float3(-bnormalp1.x, -bnormalp1.y, -bnormalp1.z); //-Boundary particle position - ghost node position.
+				if (sim2d) {
+					const double determ = cumath::Determinant3x3(a_corr2);
+					if (fabs(determ) >= determlimit) {//-Use 1e-3f (first_order) or 1e+3f (zeroth_order).
+						const tmatrix3d invacorr2 = cumath::InverseMatrix3x3(a_corr2, determ);
+						//-GHOST NODE DENSITY IS MIRRORED BACK TO THE BOUNDARY PARTICLES.
+						const float rhoghost = float(invacorr2.a11*rhopp1 + invacorr2.a12*gradrhopp1.x + invacorr2.a13*gradrhopp1.z);
+						const float grx = -float(invacorr2.a21*rhopp1 + invacorr2.a22*gradrhopp1.x + invacorr2.a23*gradrhopp1.z);
+						const float grz = -float(invacorr2.a31*rhopp1 + invacorr2.a32*gradrhopp1.x + invacorr2.a33*gradrhopp1.z);
+						rhopfinal = (rhoghost + grx*dpos.x + grz*dpos.z);
+						//-Ghost stress ==== mdbr
+						//-xx
+						const float sigmaxxg = float(invacorr2.a11*sigmap1.xx + invacorr2.a12*gradsigmaxxp1.x + invacorr2.a13*gradsigmaxxp1.z);
+						const float sixxgrx = -float(invacorr2.a21*sigmap1.xx + invacorr2.a22*gradsigmaxxp1.x + invacorr2.a23*gradsigmaxxp1.z);
+						const float sixxgrz = -float(invacorr2.a31*sigmap1.xx + invacorr2.a32*gradsigmaxxp1.x + invacorr2.a33*gradsigmaxxp1.z);
+						//-zz
+						const float sigmazzg = float(invacorr2.a11*sigmap1.zz + invacorr2.a12*gradsigmazzp1.x + invacorr2.a13*gradsigmazzp1.z);
+						const float sizzgrx = -float(invacorr2.a21*sigmap1.zz + invacorr2.a22*gradsigmazzp1.x + invacorr2.a23*gradsigmazzp1.z);
+						const float sizzgrz = -float(invacorr2.a31*sigmap1.zz + invacorr2.a32*gradsigmazzp1.x + invacorr2.a33*gradsigmazzp1.z);
+						//-xz
+						const float sigmaxzg = float(invacorr2.a11*sigmap1.xz + invacorr2.a12*gradsigmaxzp1.x + invacorr2.a13*gradsigmaxzp1.z);
+						const float sixzgrx = -float(invacorr2.a21*sigmap1.xz + invacorr2.a22*gradsigmaxzp1.x + invacorr2.a23*gradsigmaxzp1.z);
+						const float sixzgrz = -float(invacorr2.a31*sigmap1.xz + invacorr2.a32*gradsigmaxzp1.x + invacorr2.a33*gradsigmaxzp1.z);
+						//-Final stress
+						sigmafinal.xx = sigmaxxg + sixxgrx*dpos.x + sixxgrz*dpos.z;
+						sigmafinal.zz = sigmazzg + sizzgrx*dpos.x + sizzgrz*dpos.z;
+						sigmafinal.xz = sigmaxzg + sixzgrx*dpos.x + sixzgrz*dpos.z;
+						//=====
+					}
+					else if (a_corr2.a11>0) {//-Determinant is small but a11 is nonzero, 0th order ANGELO.
+						rhopfinal = float(rhopp1 / a_corr2.a11);
+						//====mdbr
+						sigmafinal.xx = float(sigmap1.xx / a_corr2.a11);
+						sigmafinal.zz = float(sigmap1.zz / a_corr2.a11);
+						sigmafinal.xz = float(sigmap1.xz / a_corr2.a11);
+					}
+					//-Ghost node velocity (0th order).
+					if (tslip != SLIP_Vel0) {
+						velrhopfinal.x = float(velp1.x / a_corr2.a11);
+						velrhopfinal.z = float(velp1.z / a_corr2.a11);
+						velrhopfinal.y = 0;
+					}
+				}
+				else {
+					const double determ = cumath::Determinant4x4(a_corr3);
+					if (fabs(determ) >= determlimit) {
+						const tmatrix4d invacorr3 = cumath::InverseMatrix4x4(a_corr3, determ);
+						//-GHOST NODE DENSITY IS MIRRORED BACK TO THE BOUNDARY PARTICLES.
+						const float rhoghost = float(invacorr3.a11*rhopp1 + invacorr3.a12*gradrhopp1.x + invacorr3.a13*gradrhopp1.y + invacorr3.a14*gradrhopp1.z);
+						const float grx = -float(invacorr3.a21*rhopp1 + invacorr3.a22*gradrhopp1.x + invacorr3.a23*gradrhopp1.y + invacorr3.a24*gradrhopp1.z);
+						const float gry = -float(invacorr3.a31*rhopp1 + invacorr3.a32*gradrhopp1.x + invacorr3.a33*gradrhopp1.y + invacorr3.a34*gradrhopp1.z);
+						const float grz = -float(invacorr3.a41*rhopp1 + invacorr3.a42*gradrhopp1.x + invacorr3.a43*gradrhopp1.y + invacorr3.a44*gradrhopp1.z);
+						rhopfinal = (rhoghost + grx*dpos.x + gry*dpos.y + grz*dpos.z);
+						//-Ghost stress ==== mdbr
+						//-xx
+						const float sigmaxxg = float(invacorr3.a11*sigmap1.xx + invacorr3.a12*gradsigmaxxp1.x + invacorr3.a13*gradsigmaxxp1.y + invacorr3.a14*gradsigmaxxp1.z);
+						const float sixxgrx = -float(invacorr3.a21*sigmap1.xx + invacorr3.a22*gradsigmaxxp1.x + invacorr3.a23*gradsigmaxxp1.y + invacorr3.a24*gradsigmaxxp1.z);
+						const float sixxgry = -float(invacorr3.a31*sigmap1.xx + invacorr3.a32*gradsigmaxxp1.x + invacorr3.a33*gradsigmaxxp1.y + invacorr3.a34*gradsigmaxxp1.z);
+						const float sixxgrz = -float(invacorr3.a41*sigmap1.xx + invacorr3.a42*gradsigmaxxp1.x + invacorr3.a43*gradsigmaxxp1.y + invacorr3.a44*gradsigmaxxp1.z);
+						//-yy
+						const float sigmayyg = float(invacorr3.a11*sigmap1.yy + invacorr3.a12*gradsigmayyp1.x + invacorr3.a13*gradsigmayyp1.y + invacorr3.a14*gradsigmayyp1.z);
+						const float siyygrx = -float(invacorr3.a21*sigmap1.yy + invacorr3.a22*gradsigmayyp1.x + invacorr3.a23*gradsigmayyp1.y + invacorr3.a24*gradsigmayyp1.z);
+						const float siyygry = -float(invacorr3.a31*sigmap1.yy + invacorr3.a32*gradsigmayyp1.x + invacorr3.a33*gradsigmayyp1.y + invacorr3.a34*gradsigmayyp1.z);
+						const float siyygrz = -float(invacorr3.a41*sigmap1.yy + invacorr3.a42*gradsigmayyp1.x + invacorr3.a43*gradsigmayyp1.y + invacorr3.a44*gradsigmayyp1.z);
+						//-zz
+						const float sigmazzg = float(invacorr3.a11*sigmap1.zz + invacorr3.a12*gradsigmazzp1.x + invacorr3.a13*gradsigmazzp1.y + invacorr3.a14*gradsigmazzp1.z);
+						const float sizzgrx = -float(invacorr3.a21*sigmap1.zz + invacorr3.a22*gradsigmazzp1.x + invacorr3.a23*gradsigmazzp1.y + invacorr3.a24*gradsigmazzp1.z);
+						const float sizzgry = -float(invacorr3.a31*sigmap1.zz + invacorr3.a32*gradsigmazzp1.x + invacorr3.a33*gradsigmazzp1.y + invacorr3.a34*gradsigmazzp1.z);
+						const float sizzgrz = -float(invacorr3.a41*sigmap1.zz + invacorr3.a42*gradsigmazzp1.x + invacorr3.a43*gradsigmazzp1.y + invacorr3.a44*gradsigmazzp1.z);
+						//-xy
+						const float sigmaxyg = float(invacorr3.a11*sigmap1.xy + invacorr3.a12*gradsigmaxyp1.x + invacorr3.a13*gradsigmaxyp1.y + invacorr3.a14*gradsigmaxyp1.z);
+						const float sixygrx = -float(invacorr3.a21*sigmap1.xy + invacorr3.a22*gradsigmaxyp1.x + invacorr3.a23*gradsigmaxyp1.y + invacorr3.a24*gradsigmaxyp1.z);
+						const float sixygry = -float(invacorr3.a31*sigmap1.xy + invacorr3.a32*gradsigmaxyp1.x + invacorr3.a33*gradsigmaxyp1.y + invacorr3.a34*gradsigmaxyp1.z);
+						const float sixygrz = -float(invacorr3.a41*sigmap1.xy + invacorr3.a42*gradsigmaxyp1.x + invacorr3.a43*gradsigmaxyp1.y + invacorr3.a44*gradsigmaxyp1.z);
+						//-yz
+						const float sigmayzg = float(invacorr3.a11*sigmap1.yz + invacorr3.a12*gradsigmayzp1.x + invacorr3.a13*gradsigmayzp1.y + invacorr3.a14*gradsigmayzp1.z);
+						const float siyzgrx = -float(invacorr3.a21*sigmap1.yz + invacorr3.a22*gradsigmayzp1.x + invacorr3.a23*gradsigmayzp1.y + invacorr3.a24*gradsigmayzp1.z);
+						const float siyzgry = -float(invacorr3.a31*sigmap1.yz + invacorr3.a32*gradsigmayzp1.x + invacorr3.a33*gradsigmayzp1.y + invacorr3.a34*gradsigmayzp1.z);
+						const float siyzgrz = -float(invacorr3.a41*sigmap1.yz + invacorr3.a42*gradsigmayzp1.x + invacorr3.a43*gradsigmayzp1.y + invacorr3.a44*gradsigmayzp1.z);
+						//-xz
+						const float sigmaxzg = float(invacorr3.a11*sigmap1.xz + invacorr3.a12*gradsigmaxzp1.x + invacorr3.a13*gradsigmaxzp1.y + invacorr3.a14*gradsigmaxzp1.z);
+						const float sixzgrx = -float(invacorr3.a21*sigmap1.xz + invacorr3.a22*gradsigmaxzp1.x + invacorr3.a23*gradsigmaxzp1.y + invacorr3.a24*gradsigmaxzp1.z);
+						const float sixzgry = -float(invacorr3.a31*sigmap1.xz + invacorr3.a32*gradsigmaxzp1.x + invacorr3.a33*gradsigmaxzp1.y + invacorr3.a34*gradsigmaxzp1.z);
+						const float sixzgrz = -float(invacorr3.a41*sigmap1.xz + invacorr3.a42*gradsigmaxzp1.x + invacorr3.a43*gradsigmaxzp1.y + invacorr3.a44*gradsigmaxzp1.z);
+						//-Final stress
+						sigmafinal.xx = sigmaxxg + sixxgrx*dpos.x + sixxgry*dpos.y + sixxgrz*dpos.z;
+						sigmafinal.yy = sigmayyg + siyygrx*dpos.x + siyygry*dpos.y + siyygrz*dpos.z;
+						sigmafinal.zz = sigmazzg + sizzgrx*dpos.x + sizzgry*dpos.y + sizzgrz*dpos.z;
+						sigmafinal.xy = sigmaxyg + sixygrx*dpos.x + sixygry*dpos.y + sixygrz*dpos.z;
+						sigmafinal.yz = sigmayzg + siyzgrx*dpos.x + siyzgry*dpos.y + siyzgrz*dpos.z;
+						sigmafinal.xz = sigmaxzg + sixzgrx*dpos.x + sixzgry*dpos.y + sixzgrz*dpos.z;
+					}
+					else if (a_corr3.a11>0) {//-Determinant is small but a11 is nonzero, 0th order ANGELO.
+						rhopfinal = float(rhopp1 / a_corr3.a11);
+						//==== mdbr
+						sigmafinal.xx = float(sigmap1.xx / a_corr3.a11);
+						sigmafinal.yy = float(sigmap1.yy / a_corr3.a11);
+						sigmafinal.zz = float(sigmap1.zz / a_corr3.a11);
+						sigmafinal.xy = float(sigmap1.xy / a_corr3.a11);
+						sigmafinal.yz = float(sigmap1.yz / a_corr3.a11);
+						sigmafinal.xz = float(sigmap1.xz / a_corr3.a11);
+					}
+					//-Ghost node velocity (0th order).
+					if (tslip != SLIP_Vel0) {
+						velrhopfinal.x = float(velp1.x / a_corr3.a11);
+						velrhopfinal.y = float(velp1.y / a_corr3.a11);
+						velrhopfinal.z = float(velp1.z / a_corr3.a11);
+					}
+				}
+				//-Store the results.
+				rhopfinal = (rhopfinal != FLT_MAX ? rhopfinal : CTE.rhopzero);
+				if (tslip == SLIP_Vel0) {//-DBC vel=0
+					velrhop[p1].w = rhopfinal;
+					sigma[p1] = sigmafinal;//mdbr
+				}
+				if (tslip == SLIP_NoSlip) {//-No-Slip
+					const float3 v = motionvel[p1];
+					velrhop[p1] = make_float4(v.x + v.x - velrhopfinal.x, v.y + v.y - velrhopfinal.y, v.z + v.z - velrhopfinal.z, rhopfinal);
+					sigma[p1] = sigmafinal;//mdbr
+				}
+				if (tslip == SLIP_FreeSlip) {//-No-Penetration and free slip    SHABA
+					float3 FSVelFinal; // final free slip boundary velocity
+					const float3 v = motionvel[p1];
+					float motion = sqrt(v.x*v.x + v.y*v.y + v.z*v.z); // to check if boundary moving
+					float norm = sqrt(bnormalp1.x*bnormalp1.x + bnormalp1.y*bnormalp1.y + bnormalp1.z*bnormalp1.z);
+					float3 normal; // creating a normailsed boundary normal
+					normal.x = fabs(bnormalp1.x) / norm; normal.y = fabs(bnormalp1.y) / norm; normal.z = fabs(bnormalp1.z) / norm;
+
+					// finding the velocity componants normal and tangential to boundary 
+					float3 normvel = make_float3(velrhopfinal.x*normal.x, velrhopfinal.y*normal.y, velrhopfinal.z*normal.z); // velocity in direction of normal pointin ginto fluid)
+					float3 tangvel = make_float3(velrhopfinal.x - normvel.x, velrhopfinal.y - normvel.y, velrhopfinal.z - normvel.z); // velocity tangential to normal
+
+					if (motion > 0) { // if moving boundary
+						float3 normmot = make_float3(v.x*normal.x, v.y*normal.y, v.z*normal.z); // boundary motion in direction normal to boundary 
+						FSVelFinal = make_float3(normmot.x + normmot.x - normvel.x, normmot.y + normmot.y - normvel.y, normmot.z + normmot.z - normvel.z);
+						// only velocity in normal direction for no-penetration
+						// fluid sees zero velocity in the tangetial direction
+					}
+					else {
+						FSVelFinal = make_float3(tangvel.x - normvel.x, tangvel.y - normvel.y, tangvel.z - normvel.z);
+						// tangential velocity equal to fluid velocity for free slip
+						// normal velocity reversed for no-penetration
+					}
+
+					// Save the velocity and density
+					velrhop[p1] = make_float4(FSVelFinal.x, FSVelFinal.y, FSVelFinal.z, rhopfinal);
+					sigma[p1] = sigmafinal;//mdbr
+				}
+			}
+		}
+	}
+}
+//==============================================================================
+/// Calculates extrapolated data on boundary particles from fluid domain for mDBC.
+/// Calcula datos extrapolados en el contorno para mDBC.
+//==============================================================================
+template<TpKernel tker, bool sim2d, TpSlipMode tslip> void Interaction_MdbcCorrectionNNT2(
+	bool fastsingle, unsigned n, unsigned nbound, float mdbcthreshold, const StDivDataGpu &dvd
+	, const tdouble3 &mapposmin, const double2 *posxy, const double *posz, const float4 *poscell
+	, const typecode *code, const unsigned *idp, const float3 *boundnormal, const float3 *motionvel
+	, float4 *velrhop, tsymatrix3f *sigma)
+{
+	const int2* beginendcellfluid = dvd.beginendcell + dvd.cellfluid;
+	const float determlimit = 1e-3f;
+	//-Interaction GhostBoundaryNodes-Fluid.
+	if (n) {
+		const unsigned bsbound = 128;
+		dim3 sgridb = cusph::GetSimpleGridSize(n, bsbound);
+		if (fastsingle) {//-mDBC-Fast_v2
+			KerInteractionMdbcCorrectionNNFluid_Fast <tker, sim2d, tslip> << <sgridb, bsbound >> > (n, nbound
+				, determlimit, mdbcthreshold, Double3(mapposmin), dvd.poscellsize, poscell
+				, dvd.scelldiv, dvd.nc, dvd.cellzero, beginendcellfluid
+				, posxy, posz, code, idp, boundnormal, motionvel, velrhop);
+			KerInteractionMdbcCorrectionNNGranular_Fast <tker, sim2d, tslip> << <sgridb, bsbound >> > (n, nbound
+				, determlimit, mdbcthreshold, Double3(mapposmin), dvd.poscellsize, poscell
+				, dvd.scelldiv, dvd.nc, dvd.cellzero, beginendcellfluid
+				, posxy, posz, code, idp, boundnormal, motionvel, velrhop,sigma);
+		}
+		else {//-mDBC_v0
+			KerInteractionMdbcCorrectionNNFluid_Dbl <tker, sim2d, tslip> << <sgridb, bsbound >> > (n, nbound
+				, determlimit, mdbcthreshold, dvd.scelldiv, dvd.nc, dvd.cellzero, beginendcellfluid
+				, posxy, posz, code, idp, boundnormal, motionvel, velrhop);
+			KerInteractionMdbcCorrectionNNGranular_Dbl <tker, sim2d, tslip> << <sgridb, bsbound >> > (n, nbound
+				, determlimit, mdbcthreshold, dvd.scelldiv, dvd.nc, dvd.cellzero, beginendcellfluid
+				, posxy, posz, code, idp, boundnormal, motionvel, velrhop,sigma);
+		}
+	}
+}
+//==============================================================================
+template<TpKernel tker> void Interaction_MdbcCorrectionNNT(bool simulate2d
+	, TpSlipMode slipmode, bool fastsingle, unsigned n, unsigned nbound
+	, float mdbcthreshold, const StDivDataGpu &dvd, const tdouble3 &mapposmin
+	, const double2 *posxy, const double *posz, const float4 *poscell, const typecode *code
+	, const unsigned *idp, const float3 *boundnormal, const float3 *motionvel, float4 *velrhop, tsymatrix3f *sigma)
+{
+	switch (slipmode) {
+	case SLIP_Vel0: { const TpSlipMode tslip = SLIP_Vel0;
+		if (simulate2d)Interaction_MdbcCorrectionNNT2 <tker, true, tslip>(fastsingle, n, nbound, mdbcthreshold, dvd, mapposmin, posxy, posz, poscell, code, idp, boundnormal, motionvel, velrhop, sigma);
+		else          Interaction_MdbcCorrectionNNT2 <tker, false, tslip>(fastsingle, n, nbound, mdbcthreshold, dvd, mapposmin, posxy, posz, poscell, code, idp, boundnormal, motionvel, velrhop, sigma);
+	}break;
+#ifndef DISABLE_MDBC_EXTRAMODES
+	case SLIP_NoSlip: { const TpSlipMode tslip = SLIP_NoSlip;
+		if (simulate2d)Interaction_MdbcCorrectionNNT2 <tker, true, tslip>(fastsingle, n, nbound, mdbcthreshold, dvd, mapposmin, posxy, posz, poscell, code, idp, boundnormal, motionvel, velrhop, sigma);
+		else          Interaction_MdbcCorrectionNNT2 <tker, false, tslip>(fastsingle, n, nbound, mdbcthreshold, dvd, mapposmin, posxy, posz, poscell, code, idp, boundnormal, motionvel, velrhop, sigma);
+	}break;
+	case SLIP_FreeSlip: { const TpSlipMode tslip = SLIP_FreeSlip;
+		if (simulate2d)Interaction_MdbcCorrectionNNT2 <tker, true, tslip>(fastsingle, n, nbound, mdbcthreshold, dvd, mapposmin, posxy, posz, poscell, code, idp, boundnormal, motionvel, velrhop, sigma);
+		else          Interaction_MdbcCorrectionNNT2 <tker, false, tslip>(fastsingle, n, nbound, mdbcthreshold, dvd, mapposmin, posxy, posz, poscell, code, idp, boundnormal, motionvel, velrhop, sigma);
+	}break;
+#endif
+	default: throw "SlipMode unknown at Interaction_MdbcCorrectionT().";
+	}
+}
+//==============================================================================
+/// Calculates extrapolated data on boundary particles from fluid domain for mDBC.
+/// Calcula datos extrapolados en el contorno para mDBC.
+//==============================================================================
+void Interaction_MdbcCorrectionNN(TpKernel tkernel, bool simulate2d, TpSlipMode slipmode
+	, bool fastsingle, unsigned n, unsigned nbound, float mdbcthreshold
+	, const StDivDataGpu &dvd, const tdouble3 &mapposmin
+	, const double2 *posxy, const double *posz, const float4 *poscell, const typecode *code
+	, const unsigned *idp, const float3 *boundnormal, const float3 *motionvel, float4 *velrhop,tsymatrix3f *sigma)
+{
+	switch (tkernel) {
+	case KERNEL_Wendland: { const TpKernel tker = KERNEL_Wendland;
+		Interaction_MdbcCorrectionNNT <tker>(simulate2d, slipmode, fastsingle, n, nbound, mdbcthreshold
+			, dvd, mapposmin, posxy, posz, poscell, code, idp, boundnormal, motionvel, velrhop, sigma);
+	}break;
+#ifndef DISABLE_KERNELS_EXTRA
+	case KERNEL_Cubic: { const TpKernel tker = KERNEL_Cubic;
+		Interaction_MdbcCorrectionNNT <tker>(simulate2d, slipmode, fastsingle, n, nbound, mdbcthreshold
+			, dvd, mapposmin, posxy, posz, poscell, code, idp, boundnormal, motionvel, velrhop, sigma);
+	}break;
+#endif
+	default: throw "Kernel unknown at Interaction_MdbcCorrectionNN().";
+	}
+}
+
+//======================End of Multi-layer MDBC=======================================
+
+
 } //end of file

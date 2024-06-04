@@ -40,5 +40,13 @@ namespace cusphNN {
   //-Kernels for the force calculation.
   void Interaction_ForcesNN(const StInterParmsg &t, double time_inc);
 
+  //-Kernels for the boundary correction (mDBC).
+  void Interaction_MdbcCorrectionNN(TpKernel tkernel, bool simulate2d
+	  , TpSlipMode slipmode, bool fastsingle, unsigned n, unsigned nbound
+	  , float mdbcthreshold, const StDivDataGpu &dvd, const tdouble3 &mapposmin
+	  , const double2 *posxy, const double *posz, const float4 *poscell
+	  , const typecode *code, const unsigned *idp, const float3 *boundnormal
+	  , const float3 *motionvel, float4 *velrhop,tsymatrix3f *sigma);
+
 }//end of file
 #endif

@@ -457,7 +457,8 @@ void JSphGpuSingle::AbortBoundOut(){
 /// Interaccion para el calculo de fuerzas.
 //==============================================================================
 void JSphGpuSingle::Interaction_Forces(TpInterStep interstep, double time_inc){
-  if(TBoundary==BC_MDBC && (MdbcCorrector || interstep!=INTERSTEP_SymCorrector))MdbcBoundCorrection(); //-Boundary correction for mDBC.
+  //if(TBoundary==BC_MDBC && (MdbcCorrector || interstep!=INTERSTEP_SymCorrector))MdbcBoundCorrection(); //-Boundary correction for mDBC.
+  if (TBoundary == BC_MDBC)MdbcBoundCorrection();
   InterStep=interstep;
   PreInteraction_Forces();
   TmgStart(Timers,TMG_CfForces);
@@ -517,9 +518,12 @@ void JSphGpuSingle::Interaction_Forces(TpInterStep interstep, double time_inc){
 void JSphGpuSingle::MdbcBoundCorrection(){
   TmgStart(Timers,TMG_CfPreForces);
   unsigned n=NpbOk;
-  cusph::Interaction_MdbcCorrection(TKernel,Simulate2D,SlipMode,MdbcFastSingle
-    ,n,CaseNbound,MdbcThreshold,DivData,Map_PosMin,Posxyg,Poszg,PosCellg,Codeg
-    ,Idpg,BoundNormalg,MotionVelg,Velrhopg);
+//  cusph::Interaction_MdbcCorrection(TKernel,Simulate2D,SlipMode,MdbcFastSingle
+//    ,n,CaseNbound,MdbcThreshold,DivData,Map_PosMin,Posxyg,Poszg,PosCellg,Codeg
+//    ,Idpg,BoundNormalg,MotionVelg,Velrhopg);
+  cusphNN::Interaction_MdbcCorrectionNN(TKernel, Simulate2D, SlipMode, MdbcFastSingle
+	  , n, CaseNbound, MdbcThreshold, DivData, Map_PosMin, Posxyg, Poszg, PosCellg, Codeg
+	  , Idpg, BoundNormalg, MotionVelg, Velrhopg,SpsTaug);//DEBUG need to confirm the stress tensor
   TmgStop(Timers,TMG_CfPreForces);
 }
 

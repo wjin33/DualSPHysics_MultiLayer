@@ -386,6 +386,9 @@ void JSphGpuSingle::RunCellDivide(bool updateperiodic){
        tsymatrix3f* spstaug = ArraysGpu->ReserveSymatrix3f();
        CellDivSingle->SortDataArrays(SpsTaug, spstaug);
        swap(SpsTaug, spstaug);  ArraysGpu->Free(spstaug);
+       tsymatrix3f* pstraing = ArraysGpu->ReserveSymatrix3f();
+       CellDivSingle->SortDataArrays(Pstraing, pstraing);
+       swap(Pstraing, pstraing);  ArraysGpu->Free(pstraing);
        float *VolFrac=ArraysGpu->ReserveFloat();
        CellDivSingle->SortDataArrays(VolFracg,VolFrac);
        swap(VolFracg,VolFrac);  ArraysGpu->Free(VolFrac);
@@ -478,7 +481,7 @@ void JSphGpuSingle::Interaction_Forces(TpInterStep interstep, double time_inc){
     ,Posxyg,Poszg,PosCellg,Velrhopg,Idpg,Codeg
     ,FtoMasspg
     ,ViscDtg, ViscEtaDtg,Arg,Aceg,Deltag
-    ,Visco_etag, SpsTaug, SpsGradvelg, D_tensorg, VolFracg, AuxNNg
+    ,Visco_etag, SpsTaug, Pstraing, SpsGradvelg, D_tensorg, VolFracg, AuxNNg
     ,ShiftPosfsg 
     ,NULL,NULL);
 

@@ -256,11 +256,18 @@ __device__ void GetStressInvariant(float &I1_t,float &J2_t,float &tau_xx, float 
                   + tau_xy * tau_xy + tau_yz * tau_yz + tau_xz * tau_xz;
 }
 
+_device_ void DPVariable(const float )
+
+__device__ void GetDPYieldFunction(float &f, const float &J2_t, const float &I1_t, const float &DP_AlphaPhi, const float &DP_kc)
+{
+  f = sqrt(J2_t) + DP_AlphaPhi * I1_t - DP_kc;
+}
+
 //==============================================================================
 /// Calculates the Soil effective stress Tensor (symetric) based on Drucker-Prager
 /// Note all the sigma are effective stress tensor
 //==============================================================================
-__device__ void GetStressTensorMultilayerSoil_sym(float2 &d_xx_xy,float2 &d_xz_yy,float2 &d_yz_zz, float3 &dtspinrate_xyz, 
+__device__ void GetStressTensorMultilayerSoil_sym(float2 &d_rate_xx_xy,float2 &d_rate_xz_yy,float2 &d_rate_yz_zz, float3 &dtspinrate_xyz, 
     ,float2 &tau_xx_xy,float2 &tau_xz_yy,float2 &tau_yz_zz, float2 &Dp_xx_xy, float2 &Dp_xz_yy, float2 &Dp_yz_zz, const float DP_K, const float DP_G
     ,const float MC_phi, const float MC_c, const float MC_psi, double &dt)
 {
@@ -285,23 +292,34 @@ __device__ void GetStressTensorMultilayerSoil_sym(float2 &d_xx_xy,float2 &d_xz_y
                   invK2G3, invK2G3, invK4G3};
   // Elastic predictor effective tensor
   tmatrix3f Sigma_e_pre;
-  Sigma_e_pre.a11 = Sigma_tensor.a11 + (De.a11 * d_xx_xy.x + De.a12 * d_xz_yy.y + De.a13 * d_yz_zz.y)*dt; //d is the strain rate tensor 
-  Sigma_e_pre.a22 = Sigma_tensor.a22 + (De.a21 * d_xx_xy.x + De.a22 * d_xz_yy.y + De.a23 * d_yz_zz.y)*dt; 
-  Sigma_e_pre.a33 = Sigma_tensor.a33 + (De.a31 * d_xx_xy.x + De.a32 * d_xz_yy.y + De.a33 * d_yz_zz.y)*dt; 
-  Sigma_e_pre.a12 = Sigma_tensor.a12 + DP_G * d_xx_xy.y * dt;
-  Sigma_e_pre.a13 = Sigma_tensor.a13 + DP_G * d_xz_yy.x * dt;
-  Sigma_e_pre.a23 = Sigma_tensor.a23 + DP_G * d_yz_zz.x * dt;
+  Sigma_e_pre.a11 = Sigma_tensor.a11 + (De.a11 * d_rate_xx_xy.x + De.a12 * d_rate_xz_yy.y + De.a13 * d_rate_yz_zz.y)*dt; //d_rate is the strain rate tensor 
+  Sigma_e_pre.a22 = Sigma_tensor.a22 + (De.a21 * d_rate_xx_xy.x + De.a22 * d_rate_xz_yy.y + De.a23 * d_rate_yz_zz.y)*dt; 
+  Sigma_e_pre.a33 = Sigma_tensor.a33 + (De.a31 * d_rate_xx_xy.x + De.a32 * d_rate_xz_yy.y + De.a33 * d_rate_yz_zz.y)*dt; 
+  Sigma_e_pre.a12 = Sigma_tensor.a12 + DP_G * d_rate_xx_xy.y * dt;
+  Sigma_e_pre.a13 = Sigma_tensor.a13 + DP_G * d_rate_xz_yy.x * dt;
+  Sigma_e_pre.a23 = Sigma_tensor.a23 + DP_G * d_rate_yz_zz.x * dt;
   Sigma_e_pre.a21 = Sigma_e_pre.a12;
   Sigma_e_pre.a31 = Sigma_e_pre.a13;
   Sigma_e_pre.a32 = Sigma_e_pre.a23;
-  float Sigma_e_pre_I1 = Sigma_e_pre.a11 + Sigma_e_pre.a22 + Sigma_e_pre.a33;
+  // Store current plastic strain Dp in a temporary variable Dp_temp
+  float2 Dp_temp_xx_xy=make_float2(0,0);
+  float2 Dp_temp_xz_yy=make_float2(0,0);
+  float2 Dp_temp_yz_zz=make_float2(0,0);
+  Dp_temp_xx_xy.x = Dp_xx_xy.x; Dp_temp_xx_xy.y = Dp_xx_xy.y; Dp_temp_xz_yy.x = Dp_xz_yy.x;
+  Dp_temp_xz_yy.y = Dp_xz_yy.y; Dp_temp_yz_zz.x = Dp_yz_zz.x; 
+  Dp_temp_yz_zz.y = Dp_yz_zz.y;     
 
   // Evaluation yield condition
-  float DP_AlphaPhi = tan(MC_phi) / sqrt(9. + 12.*tan(MC_phi)*tan(MC_phi)); // Use MC phi and c to calculate DP parameters, need to check plane strain/stress or other conditions.
+  float DP_AlphaPhi = tan(MC_phi) / sqrt(9. + 12.*tan(MC_phi)*tan(MC_phi)); // Use MC phi and c to calculate DP parameters for the yield criterion, need to check plane strain/stress or other conditions.
   float DP_kc = 3.* MC_c / sqrt(9. + 12.*tan(MC_phi)*tan(MC_phi)); 
-  float I1_t, J2_t;
+  float DP_psi = tan(MC_psi) / sart(9. + 12. * tan(MC_psi)*tan(MC_psi)); // Use MC psi (dilation angle) to calculate DP dilation angle for the flow rule
+  float I1_t, J2_t, f, dlmabda;
   GetStressInvariant(I1_t, J2_t, Sigma_e_pre.a11, Sigma_e_pre.a12, Sigma_e_pre.a13, Sigma_e_pre.a22, Sigma_e_pre.a23, Sigma_e_pre.a33);
-  double f = sqrt(J2_t) + DP_AlphaPhi * I1_t - DP_kc;
+  GetDPYieldFunction(f, J2_t, I1_t, DP_AlphaPhi, DP_kc); // Calculate yield function f 
+  
+  int iter; // set maximum iteration by checking iter < iterLimit if needed. iterLimit not used for now.
+  iter = 0;
+
   if(f<0){
       // Elastic
       Sigma_tensor.a11 = Sigma_e_pre.a11;
@@ -313,22 +331,18 @@ __device__ void GetStressTensorMultilayerSoil_sym(float2 &d_xx_xy,float2 &d_xz_y
       Sigma_tensor.a31 = Sigma_e_pre.a31;
       Sigma_tensor.a32 = Sigma_e_pre.a32;
       Sigma_tensor.a33 = Sigma_e_pre.a33;
+      Dp_xx_xy.x = Dp_temp_xx_xy.x; Dp_xx_xy.y = Dp_temp_xx_xy.y; Dp_xz_yy.x = Dp_temp_xz_yy.x;
+      Dp_xz_yy.y = Dp_temp_xz_yy.y; Dp_yz_zz.x = Dp_temp_yz_zz.x; 
+      Dpp_yz_zz.y = Dp_temp_yz_zz.y; 
       }
   else{ // plastic corrector
       double err = 1e-5;
       while (f > err){
-          int iter = 0;
-          // Calculate increment of plastic multiplier, dlambda. Need to check how it is derived
-          float dfdk = 0.0; // what is dfdk, take it as 0 for now.
-          float DP_AlphaPsi =  tan(MC_psi) / sqrt(9. + 12.*tan(MC_psi)*tan(MC_psi)); // Dilation angle 
-          double dlambda = f /(dfdk * sqrt((2. / 3.)*(3.*DP_AlphaPsi*DP_AlphaPsi + 0.5)) + 9.*DP_K*DP_AlphaPsi*DP_AlphaPsi + DP_G); //Not sure if the derivation is correct.
-          
-          // Calculate D(dg/dsigma), stiffness matrix times the partial derivative of g to sigma. 
-          // Under non-associated plastic flow assumption, plastic potential function g = sqrt(J2_t - DP_AlphaPsi * I1_t/3)
+          dlambda = f /(9.*DP_K*DP_AlphaPhi*DP_AlphaPsi + DP_G); //Not sure how this is derived. Assume non-associated flow rule? Plastic multiplier
           float GJ2 = DP_G/sqrt(J2);
-          float Ddg_dsigmaxx = 3*DP_K * DP_AlphaPsi + GJ2 * (Sigma_e_pre.a11 - Sigma_e_pre_I1/3.);
-          float Ddg_dsigmayy = 3*DP_K * DP_AlphaPsi + GJ2 * (Sigma_e_pre.a22 - Sigma_e_pre_I1/3.);
-          float Ddg_dsigmazz = 3*DP_K * DP_AlphaPsi + GJ2 * (Sigma_e_pre.a33 - Sigma_e_pre_I1/3.);  
+          float Ddg_dsigmaxx = 3*DP_K * DP_AlphaPsi + GJ2 * (Sigma_e_pre.a11 - I1_t/3.); // Need to check if this is derived correctly
+          float Ddg_dsigmayy = 3*DP_K * DP_AlphaPsi + GJ2 * (Sigma_e_pre.a22 - I1_t/3.);
+          float Ddg_dsigmazz = 3*DP_K * DP_AlphaPsi + GJ2 * (Sigma_e_pre.a33 - I1_t/3.);  
           float Ddg_dsigmaxy = GJ2 * Sigma_e_pre.a12;
           float Ddg_dsigmaxz = GJ2 * Sigma_e_pre.a13;
           float Ddg_dsigmayz = GJ2 * Sigma_e_pre.a23;
@@ -344,7 +358,7 @@ __device__ void GetStressTensorMultilayerSoil_sym(float2 &d_xx_xy,float2 &d_xz_y
           Sigma_e_pre.a11 -= dsigmap_xx;    Sigma_e_pre.a12 -= dsigmap_xy;    Sigma_e_pre.a13 -= dsigmap_xz;
           Sigma_e_pre.a21 -= dsigmap_xy;    Sigma_e_pre.a22 -= dsigmap_yy;    Sigma_e_pre.a23 -= dsigmap_yz;
           Sigma_e_pre.a31 -= dsigmap_xz;    Sigma_e_pre.a32 -= dsigmap_yz;    Sigma_e_pre.a33 -= dsigmap_zz;
-          // Plastic strain increment dDp = invD * dsigmap, why?
+          // Plastic strain increment dDp = invD * dsigmap
           FLOAT dDp_xx, dDp_yy, dDp_zz, dDp_yz, dDp_xz, dDp_xy
           dDp_xx = invDe.a11*dsigmap_xx + invDe.a12*dsigmap_yy + invDe.a13*dsigmap_zz;
 			    dDp_yy = invDe.a21*dsigmap_xx + invDe.a22*dsigmap_yy + invDe.a23*dsigmap_zz;
@@ -352,16 +366,24 @@ __device__ void GetStressTensorMultilayerSoil_sym(float2 &d_xx_xy,float2 &d_xz_y
 			    dDp_xy = 1./DP_G * dsigmap_xy;
 			    dDp_yz = 1./DP_G * dsigmap_yz;
 			    dDp_xz = 1./DP_G * dsigmap_xz;
-          //Update plastic strain, need to store Dp, not yet implemented
-          Dp_xx_xy.x += dDp_xx;     Dp_xx_xy.y += dDp_xy;     Dp_xz_yy.x += dDp_xz;
-          Dp_xz_yy.y += dDp_yy;     Dp_yz_zz.x += dDp_yz;
-          Dp_yz_zz.y += dDp_zz;
+          //Update plastic strain
+          Dp_temp_xx_xy.x += dDp_xx;     Dp_temp_xx_xy.y += dDp_xy;     Dp_temp_xz_yy.x += dDp_xz;
+          Dp_temp_xz_yy.y += dDp_yy;     Dp_temp_yz_zz.x += dDp_yz;
+          Dp_temp_yz_zz.y += dDp_zz;
           // Check updated f
           GetStressInvariant(I1_t, J2_t, Sigma_e_pre.a11, Sigma_e_pre.a12, Sigma_e_pre.a13, Sigma_e_pre.a22, Sigma_e_pre.a23, Sigma_e_pre.a33);
-          f = sqrt(J2_t) + DP_AlphaPhi * I1_t - DP_kc;
+          GetDPYieldFunction(f, J2_t, I1_t, DP_AlphaPhi, DP_kc); // Update yield function f 
           iter += 1;
       }
-    } 
+      // Update stress and plastic strain
+      Sigma_tensor.a11 = Sigma_e_pre.a11; Sigma_tensor.a12 = Sigma_e_pre.a12; Sigma_tensor.a13 = Sigma_e_pre.a13;
+      Sigma_tensor.a21 = Sigma_e_pre.a21; Sigma_tensor.a22 = Sigma_e_pre.a22; Sigma_tensor.a23 = Sigma_e_pre.a23;
+      Sigma_tensor.a31 = Sigma_e_pre.a31; Sigma_tensor.a32 = Sigma_e_pre.a32; Sigma_tensor.a33 = Sigma_e_pre.a33;
+      Dp_xx_xy.x = Dp_temp_xx_xy.x; Dp_xx_xy.y = Dp_temp_xx_xy.y; Dp_xz_yy.x = Dp_temp_xz_yy.x;
+      Dp_xz_yy.y = Dp_temp_xz_yy.y; Dp_yz_zz.x = Dp_temp_yz_zz.x;
+      Dp_yz_zz.y = Dp_temp_yz_zz.y;
+    }
+ 
   // Correct final updated effective stress with spin rate tensor
   tmatrix3f W_tensor = {0, dtspinrate_xyz.x, dtspinrate_xyz.y,
                        -dtspinrate_xyz.x, 0, dtspinrate_xyz.z,
@@ -383,7 +405,6 @@ __device__ void GetStressTensorMultilayerSoil_sym(float2 &d_xx_xy,float2 &d_xz_y
   tau_yz_zz.x = 0.5f * (Sigma_tensor.a23 + Sigma_tensor.a32);
   tau_xz_yy.y = Sigma_tensor.a22;
   tau_yz_zz.y = Sigma_tensor.a33;
-
 }
 
 //==============================================================================
@@ -1198,7 +1219,7 @@ __global__ void KerInteractionForcesFluid_NN_SPH_ConsEq(unsigned n,unsigned pini
 template<TpFtMode ftmode,TpVisco tvisco,bool symm>
 __global__ void KerInteractionForcesFluid_NN_SPH_Visco_Stress_tensor(unsigned n,unsigned pinit,float *visco_eta
   ,int scelldiv,int4 nc,int3 cellzero,const int2 *begincell,unsigned cellfluid,const unsigned *dcell
-  ,const float *ftomassp,float2 *tauff,float2 *d_tensorff,float2 *gradvelff,float *auxnn,const float4 *poscell,const float4 *velrhop
+  ,const float *ftomassp,float2 *tauff,float2 *pstrain,float2 *d_tensorff,float2 *gradvelff,float *auxnn,const float4 *poscell,const float4 *velrhop
   ,const typecode *code,const unsigned *idp, double dt)
 {
   const unsigned p=blockIdx.x*blockDim.x+threadIdx.x; //-Number of particle.
@@ -1240,7 +1261,10 @@ __global__ void KerInteractionForcesFluid_NN_SPH_Visco_Stress_tensor(unsigned n,
           const float MC_c = PHASEDRUCKERPRAGER[pp1].MC_c;    ///< Cohesion in MC model, to be converted to DP yield surface parameters DP_AlphaPhi and DP_kc
           const float MC_psi = PHASEDRUCKERPRAGER[pp1].MC_psi;    ///< Dilatancy angle in MC model, to be converted to DP non-associate flow rule parameter DP_psi
           GetStressTensorMultilayerSoil_sym(dtsrp1_xx_xy, dtsrp1_xz_yy, dtsrp1_yz_zz, dtspinratep1, taup1_xx_xy, taup1_xz_yy, taup1_yz_zz, 
-                                                       Dp_xx_xy, Dp_xz_yy, Dp_yz_zz, DP_K, DP_G, MC_AlphaPhi, MC_c, MC_psi, dt);
+                                                       Dpp1_xx_xy, Dpp1_xz_yy, Dpp1_yz_zz, DP_K, DP_G, MC_AlphaPhi, MC_c, MC_psi, dt);
+        pstrain[p1*3]=make_float2(Dpp1_xx_xy.x,Dpp1_xx_xy.y); // plastic strain component
+        pstrain[p1*3+1]=make_float2(Dpp1_xz_yy.x,Dpp1_xz_yy.y);
+        pstrain[p1*3+2]=make_float2(Dpp1_yz_zz.x,Dpp1_yz_zz.y);
         }
         tauff[p1*3]=make_float2(taup1_xx_xy.x,taup1_xx_xy.y);
         tauff[p1*3+1]=make_float2(taup1_xz_yy.x,taup1_xz_yy.y);
@@ -2233,7 +2257,7 @@ void Interaction_ForcesGpuT_NN_SPH(const StInterParmsg &t)
         // Build stress tensor
         KerInteractionForcesFluid_NN_SPH_Visco_Stress_tensor<ftmode,tvisco,true ><<<sgridf,t.bsfluid,0,t.stm>>>
           (t.fluidnum,t.fluidini,t.visco_eta,dvd.scelldiv,dvd.nc,dvd.cellzero,dvd.beginendcell,dvd.cellfluid,t.dcell
-            ,t.ftomassp,(float2*)t.tau,(float2*)t.d_tensor, (float2*)t.gradvel,t.auxnn,t.poscell,t.velrhop,t.code,t.idp,dt);
+            ,t.ftomassp,(float2*)t.tau,(float2*)t.pstrain,(float2*)t.d_tensor, (float2*)t.gradvel,t.auxnn,t.poscell,t.velrhop,t.code,t.idp,dt);
         //Get stresses
         KerInteractionForcesFluid_NN_SPH_ConsEq<tker,ftmode,tvisco,true ><<<sgridf,t.bsfluid,0,t.stm>>>
           (t.fluidnum,t.fluidini,t.viscob,t.viscof,t.visco_eta,dvd.scelldiv,dvd.nc,dvd.cellzero,dvd.beginendcell,dvd.cellfluid,t.dcell
@@ -2261,7 +2285,7 @@ void Interaction_ForcesGpuT_NN_SPH(const StInterParmsg &t)
         // Build stress tensor				
         KerInteractionForcesFluid_NN_SPH_Visco_Stress_tensor<ftmode,tvisco,false ><<<sgridf,t.bsfluid,0,t.stm>>>
           (t.fluidnum,t.fluidini,t.visco_eta,dvd.scelldiv,dvd.nc,dvd.cellzero,dvd.beginendcell,dvd.cellfluid,t.dcell
-            ,t.ftomassp,(float2*)t.tau,(float2*)t.d_tensor,t.auxnn,t.poscell,t.velrhop,t.code,t.idp);
+            ,t.ftomassp,(float2*)t.tau,(float2*)t.pstrain,(float2*)t.d_tensor,t.auxnn,t.poscell,t.velrhop,t.code,t.idp);
         //Get stresses
         KerInteractionForcesFluid_NN_SPH_ConsEq<tker,ftmode,tvisco,false ><<<sgridf,t.bsfluid,0,t.stm>>>
           (t.fluidnum,t.fluidini,t.viscob,t.viscof,t.visco_eta,dvd.scelldiv,dvd.nc,dvd.cellzero,dvd.beginendcell,dvd.cellfluid,t.dcell

@@ -124,6 +124,7 @@ typedef struct StrInterParmsg{
  // const tsymatrix3f *tau;
   //-Output data arrays.
   float *viscdt;
+  float *visco_eta; //<vs_non-Newtonian>
   float* ar;
   float3 *ace;
   float *delta;
@@ -134,8 +135,8 @@ typedef struct StrInterParmsg{
   StKerInfo *kerinfo;
   //<vs_non-Newtonian>
   float *viscetadt; //<vs_non-Newtonian>
-  float *visco_eta; //<vs_non-Newtonian>
   tsymatrix3f *tau;
+  tsymatrix3f *pstrain;
   tsymatrix3f *gradvel;
   tsymatrix3f *d_tensor; //<vs_non-Newtonian>
   float *volfrac;
@@ -160,7 +161,7 @@ typedef struct StrInterParmsg{
     ,const float4 *velrhop_,const unsigned *idp_,const typecode *code_
     ,const float *ftomassp_
     ,float *viscdt_,float *viscetadt_,float* ar_,float3 *ace_,float *delta_
-    ,float* visco_eta_, tsymatrix3f *spstau_, tsymatrix3f *spsgradvel_, tsymatrix3f *d_tensor_, float *volfrac_, float *auxnn_  //<vs_non-Newtonian>
+    ,float* visco_eta_, tsymatrix3f *spstau_, tsymatrix3f *pstrain_, tsymatrix3f *spsgradvel_, tsymatrix3f *d_tensor_, float *volfrac_, float *auxnn_  //<vs_non-Newtonian>
     ,float4 *shiftposfs_
     ,cudaStream_t stm_
     ,StKerInfo *kerinfo_)
@@ -182,14 +183,14 @@ typedef struct StrInterParmsg{
     dcell=dcell_;
     posxy=posxy_; posz=posz_; poscell=poscell_;
     velrhop=velrhop_; idp=idp_; code=code_;
-    ftomassp=ftomassp_; tau=spstau_;
+    ftomassp=ftomassp_; 
     //-Output data arrays.
     viscdt=viscdt_; ar=ar_; ace=ace_; delta=delta_;
     gradvel=spsgradvel_;
     shiftposfs=shiftposfs_;
     //<vs_non-Newtonian>    
 	multiphase = multiphase_;  tvelgrad = tvelgrad_; tvisco = tvisco_;
-	visco_eta = visco_eta_; tau = spstau_; gradvel = spsgradvel_; d_tensor = d_tensor_; volfrac = volfrac_; auxnn = auxnn_;	
+	visco_eta = visco_eta_; tau = spstau_; pstrain = pstrain_;  gradvel = spsgradvel_; d_tensor = d_tensor_; volfrac = volfrac_; auxnn = auxnn_;	
 	viscetadt = viscetadt_;	   
     //-Other values and objects.
     stm=stm_;

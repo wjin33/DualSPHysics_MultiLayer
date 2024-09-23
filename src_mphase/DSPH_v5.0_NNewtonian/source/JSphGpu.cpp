@@ -147,7 +147,7 @@ void JSphGpu::InitVars(){
   VelrhopM1g=NULL;                                 //-Verlet
   PosxyPreg=NULL; PoszPreg=NULL; VelrhopPreg=NULL; //-Symplectic
 
-  SpsTaug=NULL; SpsGradvelg=NULL;                  //-Laminar+SPS. 
+  SpsTaug=NULL; Pstraing = NULL; SpsGradvelg=NULL;                  //-Laminar+SPS. 
   D_tensorg=NULL;				  											 //-Deformation tensor. //<vs_non-Newtonian>
   AuxNNg=NULL;                   								 //-General aux <vs_non-Newtonian>
   VolFracg = NULL;
@@ -352,7 +352,7 @@ void JSphGpu::AllocGpuMemoryParticles(unsigned np,float over){
     ArraysGpu->AddArrayCount(JArraysGpu::SIZE_16B,2); //-posxypre,velrhoppre
   }
   if (TVisco != VISCO_Artificial) { //<vs_non-Newtonian>   
-	  ArraysGpu->AddArrayCount(JArraysGpu::SIZE_24B,2); //-SpsTau,SpsGradvel
+	  ArraysGpu->AddArrayCount(JArraysGpu::SIZE_24B,3); //-SpsTau,SpsGradvel, Pstrain
   }
   if (MultiPhase) { 			//<vs_non-Newtonian>
       Log->Printf("ViscoTreatment= %u ", TVisco);
@@ -402,6 +402,7 @@ void JSphGpu::ResizeGpuMemoryParticles(unsigned npnew){
   double      *poszpre    =SaveArrayGpu(Np,PoszPreg);
   float4      *velrhoppre =SaveArrayGpu(Np,VelrhopPreg);
   tsymatrix3f *spstau     =SaveArrayGpu(Np,SpsTaug);
+  tsymatrix3f *Pstrain    =SaveArrayGpu(Np,Pstraing);
   float3      *boundnormal=SaveArrayGpu(Np,BoundNormalg);
   float3      *motionvel  =SaveArrayGpu(Np,MotionVelg);
   float       *auxnn			=SaveArrayGpu(Np,AuxNNg);  //<vs_non-Newtonian>
@@ -418,6 +419,7 @@ void JSphGpu::ResizeGpuMemoryParticles(unsigned npnew){
   ArraysGpu->Free(PoszPreg);
   ArraysGpu->Free(VelrhopPreg);
   ArraysGpu->Free(SpsTaug);
+  ArraysGpu->Free(Pstraing);
   ArraysGpu->Free(BoundNormalg);
   ArraysGpu->Free(MotionVelg);
   ArraysGpu->Free(AuxNNg); //<vs_non-Newtonian>
@@ -438,6 +440,7 @@ void JSphGpu::ResizeGpuMemoryParticles(unsigned npnew){
   if(poszpre)    PoszPreg    =ArraysGpu->ReserveDouble();
   if(velrhoppre) VelrhopPreg =ArraysGpu->ReserveFloat4();
   if(spstau)     SpsTaug     =ArraysGpu->ReserveSymatrix3f();
+  if(pstrain)    Pstraing    =ArraysGpu->ReserveSymatrix3f();
   if(boundnormal)BoundNormalg=ArraysGpu->ReserveFloat3();
   if(motionvel)  MotionVelg  =ArraysGpu->ReserveFloat3();
   if(auxnn)		AuxNNg	       = ArraysGpu->ReserveFloat();  //<vs_non-Newtonian>
@@ -454,6 +457,7 @@ void JSphGpu::ResizeGpuMemoryParticles(unsigned npnew){
   RestoreArrayGpu(Np,poszpre,PoszPreg);
   RestoreArrayGpu(Np,velrhoppre,VelrhopPreg);
   RestoreArrayGpu(Np,spstau,SpsTaug);
+  RestoreArrayGpu(Np,pstrain,Pstraing);
   RestoreArrayGpu(Np,boundnormal,BoundNormalg);
   RestoreArrayGpu(Np,motionvel,MotionVelg);
   RestoreArrayGpu(Np,auxnn,AuxNNg);	            //<vs_non-Newtonian>
@@ -508,6 +512,7 @@ void JSphGpu::ReserveBasicArraysGpu(){
       //SpsTaug = ArraysGpu->ReserveSymatrix3f();
       Sigmag = ArraysGpu->ReserveFloat3(); //This is used for stress output
       VolFracg = ArraysGpu->ReserveFloat();
+      Pstraing = ArrayGpu->ReserveFloat3();
       //Forceg = ArraysGpu->ReserveFloat3();
   }
 
@@ -748,12 +753,11 @@ void JSphGpu::ConfigBlockSizes(bool usezone,bool useperi){
         ,lamsps,MultiPhase,TVisco, TVelGrad,TDensity,ShiftingMode
         ,0,0,0,0,100,0,0
         ,0,divdatag,NULL
-        ,NULL,NULL,NULL
-        ,NULL,NULL,NULL
-        ,NULL,NULL
-        ,NULL,NULL,NULL,NULL
-        ,NULL,NULL,NULL,NULL
-        ,NULL,NULL
+        ,NULL,NULL,NULL,NULL,NULL,NULL
+        ,NULL
+        ,NULL,NULL,NULL,NULL,NULL
+        ,NULL,NULL,NULL,NULL,NULL,NULL,NULL
+        ,NULL
         ,NULL,&kerinfo);
       if(!MultiPhase)cusph::Interaction_Forces(parms);
       else cusphNN::Interaction_ForcesNN(parms);
@@ -904,8 +908,9 @@ void JSphGpu::InitRunGpu(){
   if(TVISCO==VISCO_SoilWater){
       cudaMemset(SpsTaug,0,sizeof(tsymatrix3f)*Np); //<vs_non-Newtonian>
       //cudaMemset(Forceg,0,sizeof(float3)*Np);
+      cudaMemset(Pstraing,0,sizeof(tsymatrix3f)*Np);
       cudaMemset(VolFracg,0,sizeof(float)*Np);
-      cusph::InitializeVolFracRhoTau(Np,Npb,Codeg,SpsTaug,VolFracg,TVisco);
+      cusph::InitializeVolFracRhoTauPstain(Np,Npb,Codeg,SpsTaug,Pstraing, Velrhopg,VolFracg,TVisco);
   }
   if(CaseNfloat)InitFloating();
   if(MotionVelg)cudaMemset(MotionVelg,0,sizeof(float3)*Np);
@@ -957,6 +962,7 @@ void JSphGpu::PreInteraction_Forces(){
     D_tensorg=ArraysGpu->ReserveSymatrix3f();
     Visco_etag=ArraysGpu->ReserveFloat();
     SpsTaug=ArraysGpu->ReserveSymatrix3f();
+    Pstraing=ArraysGpu->ReserveSymatrix3f();
   }
 
   //-Initialise arrays.
@@ -994,9 +1000,11 @@ void JSphGpu::PosInteraction_Forces(){
     ArraysGpu->Free(Visco_etag);	 Visco_etag=NULL;
     ArraysGpu->Free(ViscEtaDtg);	 ViscEtaDtg=NULL;
     ArraysGpu->Free(SpsTaug); SpsTaug=NULL;
+    ArraysGpu->Free(Pstraing); Pstraing=NULL;
     if (TVisco != VISCO_SoilWater) {
       ArraysGpu->Free(SpsTaug);      SpsTaug = NULL;
       ArraysGpu->Free(VolFracg);  VolFracg = NULL;
+      ArraysGpu->Free(Pstraing); Pstraing=NULL;
     }
   }
 }

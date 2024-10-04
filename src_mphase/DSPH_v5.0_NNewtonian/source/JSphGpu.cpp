@@ -302,7 +302,7 @@ void JSphGpu::AllocCpuMemoryParticles(unsigned np){
       AuxVel=new tfloat3[np];    MemCpuParticles+=sizeof(tfloat3)*np;
       AuxRhop=new float[np];     MemCpuParticles+=sizeof(float)*np;
       AuxNN=new float[np];       MemCpuParticles+=sizeof(float)*np; //<vs_non-Newtonian>
-      VolFrac=new flot[np];      MemCpuParticles+=sizeof(float)*np;
+      VolFrac=new float[np];      MemCpuParticles+=sizeof(float)*np;
       Sigma=new tfloat3[np];     MemCpuParticles+=sizeof(tfloat3)*np;
     }
     catch(const std::bad_alloc){
@@ -402,7 +402,7 @@ void JSphGpu::ResizeGpuMemoryParticles(unsigned npnew){
   double      *poszpre    =SaveArrayGpu(Np,PoszPreg);
   float4      *velrhoppre =SaveArrayGpu(Np,VelrhopPreg);
   tsymatrix3f *spstau     =SaveArrayGpu(Np,SpsTaug);
-  tsymatrix3f *Pstrain    =SaveArrayGpu(Np,Pstraing);
+  tsymatrix3f *pstrain    =SaveArrayGpu(Np,Pstraing);
   float3      *boundnormal=SaveArrayGpu(Np,BoundNormalg);
   float3      *motionvel  =SaveArrayGpu(Np,MotionVelg);
   float       *auxnn			=SaveArrayGpu(Np,AuxNNg);  //<vs_non-Newtonian>
@@ -512,7 +512,7 @@ void JSphGpu::ReserveBasicArraysGpu(){
       //SpsTaug = ArraysGpu->ReserveSymatrix3f();
       Sigmag = ArraysGpu->ReserveFloat3(); //This is used for stress output
       VolFracg = ArraysGpu->ReserveFloat();
-      Pstraing = ArrayGpu->ReserveFloat3();
+      Pstraing = ArraysGpu->ReserveSymatrix3f();
       //Forceg = ArraysGpu->ReserveFloat3();
   }
 
@@ -624,7 +624,7 @@ void JSphGpu::ParticlesDataUp(unsigned n,const tfloat3 *boundnormal){
   cudaMemcpy(Velrhopg,Velrhop,sizeof(float4)*n  ,cudaMemcpyHostToDevice);
   if(UseNormals)cudaMemcpy(BoundNormalg,boundnormal,sizeof(float3)*n,cudaMemcpyHostToDevice);
   if(MultiPhase && TVisco!=VISCO_SoilWater)cudaMemcpy(AuxNNg,AuxNN,sizeof(float)*n,cudaMemcpyHostToDevice); //<vs_non-Newtonian>
-  if(TVisco= = VISCO_SoilWater){
+  if(TVisco== VISCO_SoilWater){
     //cudaMemcpy(Forceg   ,Force   ,sizeof(float3)*n  ,cudaMemcpyHostToDevice);
     cudaMemcpy(VolFracg,VolFrac,sizeof(float)*n  ,cudaMemcpyHostToDevice);
   }
@@ -905,12 +905,12 @@ void JSphGpu::InitRunGpu(){
 
   if(TStep==STEP_Verlet)cudaMemcpy(VelrhopM1g,Velrhopg,sizeof(float4)*Np,cudaMemcpyDeviceToDevice);
   if(!MultiPhase && TVisco==VISCO_LaminarSPS)cudaMemset(SpsTaug,0,sizeof(tsymatrix3f)*Np); //<vs_non-Newtonian>
-  if(TVISCO==VISCO_SoilWater){
+  if(TVisco==VISCO_SoilWater){
       cudaMemset(SpsTaug,0,sizeof(tsymatrix3f)*Np); //<vs_non-Newtonian>
       //cudaMemset(Forceg,0,sizeof(float3)*Np);
       cudaMemset(Pstraing,0,sizeof(tsymatrix3f)*Np);
       cudaMemset(VolFracg,0,sizeof(float)*Np);
-      cusph::InitializeVolFracRhoTauPstain(Np,Npb,Codeg,SpsTaug,Pstraing, Velrhopg,VolFracg,TVisco);
+      //cusph::InitializeVolFracRhoTauPstain(Np,Npb,Codeg,SpsTaug,Pstraing, Velrhopg,VolFracg,TVisco); //NEED TO ADD
   }
   if(CaseNfloat)InitFloating();
   if(MotionVelg)cudaMemset(MotionVelg,0,sizeof(float3)*Np);

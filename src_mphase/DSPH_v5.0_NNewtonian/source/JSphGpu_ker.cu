@@ -1546,7 +1546,7 @@ __global__ void KerComputeSpsTau(unsigned n,unsigned pini,float smag,float blin
 }
 
 __global__ void kerInitializeVolFracRhoTauPstrain(unsigned n,unsigned pini,const typecode *code
-  ,float2 *tauff,float2 *pstrain, float2 *pstrain, float4 *velrhop, float *VolFrac,float3 *force,TpVisco tvisco)
+  ,float2 *tauff,float2 *pstrain, float4 *velrhop, float *VolFrac,float3 *force,TpVisco tvisco)
 {
   unsigned p=blockIdx.x*blockDim.x + threadIdx.x; 
   if(p<n){
@@ -1562,7 +1562,7 @@ __global__ void kerInitializeVolFracRhoTauPstrain(unsigned n,unsigned pini,const
                         // note if p1 is soil, VolFrac = 1 means 100% soil and if p1 is water, VolFrac = 1 means 100% water
     if(pp1 == 1)
     {// Don't need to worry about density of fluids, they are calculated from pressure in interaction_forces
-    velrhop[p1].w = PhaseDruckerPrager[pp1].DP_rho;
+    velrhop[p1].w = PhaseDruckerPrager[pp1].DP_rho;//Need to Stores constants for the GPU interactio
     }
   }
 }
@@ -1572,7 +1572,7 @@ void InitializeVolFracRhoTauPstrain(unsigned np,unsigned npb,const typecode *cod
   const unsigned npf=np-npb;
   if(npf){
     dim3 sgridf=GetSimpleGridSize(npf,SPHBSIZE);
-    kerInitializeVolFracRhoTauPstrain <<<sgridf,SPHBSIZE,0,stm>>> (npf,npb,code,(float2*)tau,(float2*)pstrain,(float4*)Velrhopg,VolFracg,(float3*)Forceg,tvisco);
+    kerInitializeVolFracRhoTauPstrain <<<sgridf,SPHBSIZE,0,stm>>> (npf,npb,code,(float2*)tau,(tsymatrix3f*)pstrain,(float4*)Velrhopg,VolFracg,(float3*)Forceg,tvisco);
   }
 }
 

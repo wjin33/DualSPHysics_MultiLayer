@@ -38,7 +38,7 @@ namespace cusphNN {
     ,double2 *posxy,double *posz,float4 *velrhop,float *auxnn,double2 *posxypre,double *poszpre,float4 *velrhoppre);
 
   //-Kernels for the force calculation.
-  void Interaction_ForcesNN(const StInterParmsg &t, double time_inc);
+  void Interaction_ForcesNN(const StInterParmsg &t);
 
   //-Kernels for the boundary correction (mDBC).
   void Interaction_MdbcCorrectionNN(TpKernel tkernel, bool simulate2d

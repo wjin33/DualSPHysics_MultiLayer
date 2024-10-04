@@ -459,7 +459,7 @@ void JSphGpuSingle::AbortBoundOut(){
 /// Interaction for force computation.
 /// Interaccion para el calculo de fuerzas.
 //==============================================================================
-void JSphGpuSingle::Interaction_Forces(TpInterStep interstep, double time_inc){
+void JSphGpuSingle::Interaction_Forces(TpInterStep interstep){
   //if(TBoundary==BC_MDBC && (MdbcCorrector || interstep!=INTERSTEP_SymCorrector))MdbcBoundCorrection(); //-Boundary correction for mDBC.
   if (TBoundary == BC_MDBC)MdbcBoundCorrection();
   InterStep=interstep;
@@ -486,7 +486,7 @@ void JSphGpuSingle::Interaction_Forces(TpInterStep interstep, double time_inc){
     ,NULL,NULL);
 
   if(!MultiPhase)cusph::Interaction_Forces(parms);
-  else         cusphNN::Interaction_ForcesNN(parms, time_inc);  //<vs_non-Newtonian>
+  else         cusphNN::Interaction_ForcesNN(parms);  //<vs_non-Newtonian>
 
   //-Interaction DEM Floating-Bound & Floating-Floating. //(DEM)
   if(UseDEM)cusph::Interaction_ForcesDem(BlockSizes.forcesdem,CaseNfloat

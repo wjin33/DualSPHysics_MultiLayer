@@ -48,7 +48,7 @@ void CteInteractionUp_NN(unsigned phasecount,const StPhaseCte *phasecte,const St
 }
 void CteInteractionUp_NN(unsigned phasecount, const StPhaseDruckerPrager *phaseDruckerPrager){
   cudaMemcpyToSymbol(PHASEDRUCKERPRAGER,phaseDruckerPrager,sizeof(StPhaseDruckerPrager)*phasecount);
-}
+}//DEBUG
 
 //------------------------------------------------------------------------------
 /// Doubles the position of the indicated particle using a displacement.
@@ -251,12 +251,14 @@ __device__ void GetStressTensorMultilayerFluid_sym(float2 &d_p1_xx_xy,float2 &d_
 //==============================================================================
 __device__ void GetStressInvariant(float &I1_t,float &J2_t,float &tau_xx, float &tau_xy, float &tau_xz, float &tau_yy, float &tau_yz, float &tau_zz)
 {
-  I1_t = tau_xx + tau_yy.y + tau_zz;
+  I1_t = tau_xx + tau_yy + tau_zz;
   J2_t = (pow((tau_xx - tau_zz),2) + pow((tau_yy - tau_zz),2) + pow((tau_yy - tau_xx),2)) / 6. 
                   + tau_xy * tau_xy + tau_yz * tau_yz + tau_xz * tau_xz;
 }
 
-_device_ void DPVariable(const float )
+// _device_ void DPVariable(const float)
+
+
 
 __device__ void GetDPYieldFunction(float &f, const float &J2_t, const float &I1_t, const float &DP_AlphaPhi, const float &DP_kc)
 {
@@ -312,10 +314,10 @@ __device__ void GetStressTensorMultilayerSoil_sym(float2 &d_rate_xx_xy,float2 &d
   // Evaluation yield condition
   float DP_AlphaPhi = tan(MC_phi) / sqrt(9. + 12.*tan(MC_phi)*tan(MC_phi)); // Use MC phi and c to calculate DP parameters for the yield criterion, need to check plane strain/stress or other conditions.
   float DP_kc = 3.* MC_c / sqrt(9. + 12.*tan(MC_phi)*tan(MC_phi)); 
-  float DP_psi = tan(MC_psi) / sart(9. + 12. * tan(MC_psi)*tan(MC_psi)); // Use MC psi (dilation angle) to calculate DP dilation angle for the flow rule
-  float I1_t, J2_t, f, dlmabda;
+  float DP_psi = tan(MC_psi) / sqrt(9. + 12. * tan(MC_psi)*tan(MC_psi)); // Use MC psi (dilation angle) to calculate DP dilation angle for the flow rule
+  float I1_t, J2_t, f, dlambda;
   GetStressInvariant(I1_t, J2_t, Sigma_e_pre.a11, Sigma_e_pre.a12, Sigma_e_pre.a13, Sigma_e_pre.a22, Sigma_e_pre.a23, Sigma_e_pre.a33);
-  GetDPYieldFunction(f, J2_t, I1_t, DP_AlphaPhi, DP_kc); // Calculate yield function f 
+  GetDPYieldFunction(f, J2_t, I1_t, DP_psi, DP_kc); // Calculate yield function f 
   
   int iter; // set maximum iteration by checking iter < iterLimit if needed. iterLimit not used for now.
   iter = 0;
@@ -333,16 +335,16 @@ __device__ void GetStressTensorMultilayerSoil_sym(float2 &d_rate_xx_xy,float2 &d
       Sigma_tensor.a33 = Sigma_e_pre.a33;
       Dp_xx_xy.x = Dp_temp_xx_xy.x; Dp_xx_xy.y = Dp_temp_xx_xy.y; Dp_xz_yy.x = Dp_temp_xz_yy.x;
       Dp_xz_yy.y = Dp_temp_xz_yy.y; Dp_yz_zz.x = Dp_temp_yz_zz.x; 
-      Dpp_yz_zz.y = Dp_temp_yz_zz.y; 
+      Dp_yz_zz.y = Dp_temp_yz_zz.y; 
       }
   else{ // plastic corrector
       double err = 1e-5;
       while (f > err){
-          dlambda = f /(9.*DP_K*DP_AlphaPhi*DP_AlphaPsi + DP_G); //Not sure how this is derived. Assume non-associated flow rule? Plastic multiplier
-          float GJ2 = DP_G/sqrt(J2);
-          float Ddg_dsigmaxx = 3*DP_K * DP_AlphaPsi + GJ2 * (Sigma_e_pre.a11 - I1_t/3.); // Need to check if this is derived correctly
-          float Ddg_dsigmayy = 3*DP_K * DP_AlphaPsi + GJ2 * (Sigma_e_pre.a22 - I1_t/3.);
-          float Ddg_dsigmazz = 3*DP_K * DP_AlphaPsi + GJ2 * (Sigma_e_pre.a33 - I1_t/3.);  
+          dlambda = f /(9.*DP_K*DP_AlphaPhi*DP_psi + DP_G); //Not sure how this is derived. Assume non-associated flow rule? Plastic multiplier
+          float GJ2 = DP_G/sqrt(J2_t);
+          float Ddg_dsigmaxx = 3*DP_K * DP_psi + GJ2 * (Sigma_e_pre.a11 - I1_t/3.); // Need to check if this is derived correctly
+          float Ddg_dsigmayy = 3*DP_K * DP_psi + GJ2 * (Sigma_e_pre.a22 - I1_t/3.);
+          float Ddg_dsigmazz = 3*DP_K * DP_psi + GJ2 * (Sigma_e_pre.a33 - I1_t/3.);
           float Ddg_dsigmaxy = GJ2 * Sigma_e_pre.a12;
           float Ddg_dsigmaxz = GJ2 * Sigma_e_pre.a13;
           float Ddg_dsigmayz = GJ2 * Sigma_e_pre.a23;
@@ -359,7 +361,7 @@ __device__ void GetStressTensorMultilayerSoil_sym(float2 &d_rate_xx_xy,float2 &d
           Sigma_e_pre.a21 -= dsigmap_xy;    Sigma_e_pre.a22 -= dsigmap_yy;    Sigma_e_pre.a23 -= dsigmap_yz;
           Sigma_e_pre.a31 -= dsigmap_xz;    Sigma_e_pre.a32 -= dsigmap_yz;    Sigma_e_pre.a33 -= dsigmap_zz;
           // Plastic strain increment dDp = invD * dsigmap
-          FLOAT dDp_xx, dDp_yy, dDp_zz, dDp_yz, dDp_xz, dDp_xy
+		  float dDp_xx, dDp_yy, dDp_zz, dDp_yz, dDp_xz, dDp_xy;
           dDp_xx = invDe.a11*dsigmap_xx + invDe.a12*dsigmap_yy + invDe.a13*dsigmap_zz;
 			    dDp_yy = invDe.a21*dsigmap_xx + invDe.a22*dsigmap_yy + invDe.a23*dsigmap_zz;
 			    dDp_zz = invDe.a31*dsigmap_xx + invDe.a32*dsigmap_yy + invDe.a33*dsigmap_zz;

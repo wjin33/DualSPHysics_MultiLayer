@@ -269,14 +269,14 @@ __device__ void GetDPYieldFunction(float &f, const float &J2_t, const float &I1_
 /// Calculates the Soil effective stress Tensor (symetric) based on Drucker-Prager
 /// Note all the sigma are effective stress tensor
 //==============================================================================
-__device__ void GetStressTensorMultilayerSoil_sym(float2 &d_rate_xx_xy,float2 &d_rate_xz_yy,float2 &d_rate_yz_zz, float3 &dtspinrate_xyz, 
+__device__ void GetStressTensorMultilayerSoil_sym(float2 &d_rate_xx_xy,float2 &d_rate_xz_yy,float2 &d_rate_yz_zz, float3 &dtspinrate_xyz 
     ,float2 &tau_xx_xy,float2 &tau_xz_yy,float2 &tau_yz_zz, float2 &Dp_xx_xy, float2 &Dp_xz_yy, float2 &Dp_yz_zz, const float DP_K, const float DP_G
     ,const float MC_phi, const float MC_c, const float MC_psi, double &dt)
 {
   // Effective stress tensor before update
-  tmatrix3f Sigma_tensor= {taup1_xx_xy.x, taup1_xx_xy.y, taup1_xz_yy.x, 
-                           taup1_xx_xy.y, taup1_xz_yy.y, taup1_yz_zz.x, 
-                           taup1_xz_yy.x, taup1_yz_zz.x, taup1_yz_zz.y};
+  tmatrix3f Sigma_tensor= {tau_xx_xy.x, tau_xx_xy.y, tau_xz_yy.x, 
+                           tau_xx_xy.y, tau_xz_yy.y, tau_yz_zz.x, 
+                           tau_xz_yy.x, tau_yz_zz.x, tau_yz_zz.y};
                           
   // Elastic stiffness tensor, isotropic, homogeneous
   float K4G3 = float(DP_K + 4.*DP_G/3.);
@@ -1251,7 +1251,7 @@ __global__ void KerInteractionForcesFluid_NN_SPH_Visco_Stress_tensor(unsigned n,
 
         //Spin rate tensor
         float3 dtspinratep1 =  make_float3(0,0,0);
-        //GetStrainSpinRateTensor(grap1_xx_xy,grap1_xz_yy,grap1_yz_zz,dtsrp1_xx_xy,dtsrp1_xz_yy,dtsrp1_yz_zz,dtspinratep1); No need for symmetric tensor?
+        GetStrainSpinRateTensor(grap1_xx_xy,grap1_xz_yy,grap1_yz_zz,dtsrp1_xx_xy,dtsrp1_xz_yy,dtsrp1_yz_zz,dtspinratep1); //No need for symmetric tensor?
         //if (pp1 == 0){
         //  const float visco_etap1 = PHASECTE[pp1].visco;
         //  GetStressTensorMultilayerFluid_sym(dtsrp1_xx_xy,dtsrp1_xz_yy,dtsrp1_yz_zz,visco_etap1,taup1_xx_xy,taup1_xz_yy,taup1_yz_zz);
@@ -2118,8 +2118,8 @@ __global__ void KerInteractionForcesFluid_NN_SPH_PressGrad(unsigned n,unsigned p
   ,TpShifting shiftmode,float4 *shiftposfs, float *volfrac)
 {
   const unsigned p=blockIdx.x*blockDim.x+threadIdx.x; //-Number of particle.
-  float usp1 = 0f; // soil interpolation velocity at fluid particle
-  float prep1 = 0f; // water interpolation pressure at soil particle
+  float usp1 = 0.0f; // soil interpolation velocity at fluid particle
+  float prep1 = 0.0f; // water interpolation pressure at soil particle
 
   if(p<n) {
     unsigned p1=p+pinit;      //-Number of particle.
@@ -2220,7 +2220,7 @@ __global__ void KerInteractionForcesFluid_NN_SPH_PressGrad(unsigned n,unsigned p
     }
   }
 }
-
+}
 //==============================================================================
 /// Interaction for the force computation using the SPH approach.
 /// Interaccion para el calculo de fuerzas que utilizan el enfoque de la SPH .

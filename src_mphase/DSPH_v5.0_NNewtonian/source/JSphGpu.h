@@ -109,6 +109,11 @@ protected:
   double *Posz;
   tfloat4 *Velrhop;
 
+  //-ruofeng
+  tsymatrix3f *Sigma;
+  tfloat3 *AuxSigma_xx_yy_zz;
+  tfloat3 *AuxSigma_xy_yz_xz;
+
   //-Auxiliary variables for the conversion (size=ParticlesSize).
   //-Variables auxiliares para conversion (size=ParticlesSize).
   tdouble3 *AuxPos;
@@ -141,15 +146,19 @@ protected:
 
   float3 *BoundNormalg;  ///<Normal (x,y,z) pointing from boundary particles to ghost nodes.
   float3 *MotionVelg;    ///<Velocity of a moving boundary particle.
+  //-ruofeng
+  tsymatrix3f *Sigmag;
+
     
   //-Variables for compute step: VERLET.
   float4 *VelrhopM1g;  ///<Verlet: in order to keep previous values. | Verlet: para guardar valores anteriores.
-
+  tsymatrix3f *SigmaM1g;//ruofeng
   //-Variables for compute step: SYMPLECTIC.
   double2 *PosxyPreg;  ///<Sympletic: in order to keep previous values. | Sympletic: para guardar valores en predictor.
   double *PoszPreg;
   float4 *VelrhopPreg;
-
+  tsymatrix3f *SigmaPreg;//ruofeng
+  
   //-Variables for floating bodies.
   unsigned *FtRidpg;      ///<Identifier to access to the particles of the floating object [CaseNfloat].
   float *FtoMasspg;       ///<Mass of the particle for each floating body [FtCount] in GPU (used in interaction forces).
@@ -185,7 +194,7 @@ protected:
   float3 *Aceg;      ///<Accumulates acceleration of the particles. | Acumula fuerzas de interaccion.
   float *Arg; 
   float *Deltag;     ///<Accumulates adjustment of Delta-SPH with DELTA_DynamicExt. | Acumula ajuste de Delta-SPH con DELTA_DynamicExt.
-
+  tsymatrix3f *Rsigmag; //Stress rate tensor ruofeng
   float4 *ShiftPosfsg;  ///<Particle displacement and free surface detection for Shifting.
 
   double VelMax;      ///<Maximum value of Vel[] sqrt(vel.x^2 + vel.y^2 + vel.z^2) computed in PreInteraction_Forces().

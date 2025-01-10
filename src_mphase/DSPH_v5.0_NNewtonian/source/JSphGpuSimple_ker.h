@@ -50,12 +50,14 @@ void ComputeStepVerlet(bool floating,bool shift,bool inout,unsigned np,unsigned 
   ,typecode *code,double2 *movxy,double *movz,float4 *velrhopnew,cudaStream_t stm);
 void ComputeStepSymplecticPre(bool floating,bool shift,bool inout,unsigned np,unsigned npb
   ,const float4 *velrhoppre,const float *ar,const float3 *ace,const float4 *shiftposfs
+  ,const tsymatrix3f* sigmapre, const tsymatrix3f* rsigma
   ,const float3 *indirvel,double dtm,float rhopzero,float rhopoutmin,float rhopoutmax,tfloat3 gravity
-  ,typecode *code,double2 *movxy,double *movz,float4 *velrhop,cudaStream_t stm);
+  ,typecode *code,double2 *movxy,double *movz,float4 *velrhop,tsymatrix3f* sigma,cudaStream_t stm);
 void ComputeStepSymplecticCor(bool floating,bool shift,bool inout,unsigned np,unsigned npb
   ,const float4 *velrhoppre,const float *ar,const float3 *ace,const float4 *shiftposfs
+  ,const tsymatrix3f* sigmapre, const tsymatrix3f* rsigma
   ,const float3 *indirvel,double dtm,double dt,float rhopzero,float rhopoutmin,float rhopoutmax,tfloat3 gravity
-  ,typecode *code,double2 *movxy,double *movz,float4 *velrhop,cudaStream_t stm);
+  ,typecode *code,double2 *movxy,double *movz,float4 *velrhop,tsymatrix3f* sigma,cudaStream_t stm);
 
 
 }

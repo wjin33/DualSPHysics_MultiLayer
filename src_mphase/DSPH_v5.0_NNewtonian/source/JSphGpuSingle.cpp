@@ -151,6 +151,9 @@ void JSphGpuSingle::ConfigDomain(){
   memcpy(AuxPos,PartsLoaded->GetPos(),sizeof(tdouble3)*Np);
   memcpy(Idp,PartsLoaded->GetIdp(),sizeof(unsigned)*Np);
   memcpy(Velrhop,PartsLoaded->GetVelRhop(),sizeof(tfloat4)*Np);
+  //========= mdbr
+  memset(Sigma, 0, sizeof(tsymatrix3f) * Np);
+  //========= mdbr
 
   //-Computes radius of floating bodies.
   if(CaseNfloat && PeriActive!=0 && !PartBegin)CalcFloatingRadius(Np,AuxPos,Idp);
@@ -353,7 +356,13 @@ void JSphGpuSingle::RunCellDivide(bool updateperiodic){
     double2*  posxyg=ArraysGpu->ReserveDouble2();
     double*   poszg=ArraysGpu->ReserveDouble();
     float4*   velrhopg=ArraysGpu->ReserveFloat4();
+    //==== mdbr
+    tsymatrix3f* sigmag = ArraysGpu->ReserveSymatrix3f();
     CellDivSingle->SortBasicArrays(Idpg,Codeg,Dcellg,Posxyg,Poszg,Velrhopg,idpg,codeg,dcellg,posxyg,poszg,velrhopg);
+    //==== mdbr
+    CellDivSingle->SortDataArrays(Sigmag, sigmag);
+    swap(Sigmag, sigmag);   ArraysGpu->Free(sigmag);
+    //====    
     swap(Idpg,idpg);           ArraysGpu->Free(idpg);
     swap(Codeg,codeg);         ArraysGpu->Free(codeg);
     swap(Dcellg,dcellg);       ArraysGpu->Free(dcellg);
@@ -363,6 +372,11 @@ void JSphGpuSingle::RunCellDivide(bool updateperiodic){
   }
   if(TStep==STEP_Verlet){
     float4* velrhopg=ArraysGpu->ReserveFloat4();
+    //==== mdbr
+    tsymatrix3f* sigmag = ArraysGpu->ReserveSymatrix3f();
+    CellDivSingle->SortDataArrays(SigmaM1g, sigmag);
+    swap(SigmaM1g, sigmag);   ArraysGpu->Free(sigmag);
+    //
     CellDivSingle->SortDataArrays(VelrhopM1g,velrhopg);
     swap(VelrhopM1g,velrhopg);   ArraysGpu->Free(velrhopg);
   }
@@ -375,6 +389,10 @@ void JSphGpuSingle::RunCellDivide(bool updateperiodic){
     swap(PosxyPreg,posxyg);      ArraysGpu->Free(posxyg);
     swap(PoszPreg,poszg);        ArraysGpu->Free(poszg);
     swap(VelrhopPreg,velrhopg);  ArraysGpu->Free(velrhopg);
+    //==== mdbr
+    tsymatrix3f* sigmag = ArraysGpu->ReserveSymatrix3f();
+    CellDivSingle->SortDataArrays(SigmaPreg, sigmag);
+    swap(SigmaPreg, sigmag);   ArraysGpu->Free(sigmag);
   }
   if(!MultiPhase && TVisco==VISCO_LaminarSPS) { //<vs_non-Newtonian>
     tsymatrix3f *spstaug=ArraysGpu->ReserveSymatrix3f();

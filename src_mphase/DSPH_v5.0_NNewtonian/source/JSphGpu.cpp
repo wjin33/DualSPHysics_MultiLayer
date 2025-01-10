@@ -60,6 +60,7 @@ using namespace std;
 JSphGpu::JSphGpu(bool withmpi):JSph(false,false,withmpi),DivAxis(MGDIV_None){
   ClassName="JSphGpu";
   Idp=NULL; Code=NULL; Dcell=NULL; Posxy=NULL; Posz=NULL; Velrhop=NULL;
+  Sigma=NULL; AuxSigma_xx_yy_zz=NULL;AuxSigma_xy_yz_xz=NULL;//ruofeng
   AuxPos=NULL; AuxVel=NULL; AuxRhop=NULL;
   AuxNN = NULL; //<vs_non-Newtonian>
   VolFrac = NULL; Sigma = NULL; 
@@ -143,9 +144,12 @@ void JSphGpu::InitVars(){
   FreeCpuMemoryParticles();
   FreeCpuMemoryFixed();
   Idpg=NULL; Codeg=NULL; Dcellg=NULL; Posxyg=NULL; Poszg=NULL; PosCellg=NULL; Velrhopg=NULL;
+  Sigmag=NULL;//ruofeng
   BoundNormalg=NULL; MotionVelg=NULL; //-mDBC
-  VelrhopM1g=NULL;                                 //-Verlet
+  VelrhopM1g=NULL;
+  SigmaM1g=NULL;//ruofeng                                 //-Verlet
   PosxyPreg=NULL; PoszPreg=NULL; VelrhopPreg=NULL; //-Symplectic
+  SigmaPreg=NULL;//ruofeng
 
   SpsTaug=NULL; Pstraing = NULL; SpsGradvelg=NULL;                  //-Laminar+SPS. 
   D_tensorg=NULL;				  											 //-Deformation tensor. //<vs_non-Newtonian>
@@ -155,6 +159,7 @@ void JSphGpu::InitVars(){
   ViscDtg=NULL; 
   ViscEtaDtg = NULL; 															//<vs_non-Newtonian>
   Arg=NULL; Aceg=NULL; Deltag=NULL;
+  Rsigmag=NULL;//ruofeng
   ShiftPosfsg=NULL;                                //-Shifting.
   RidpMoveg=NULL;
   FtRidpg=NULL;   FtoMasspg=NULL;                  //-Floatings.
@@ -273,13 +278,18 @@ void JSphGpu::FreeCpuMemoryParticles(){
   delete[] Posxy;      Posxy=NULL;
   delete[] Posz;       Posz=NULL;
   delete[] Velrhop;    Velrhop=NULL;
+  //ruofeng
+  delete[] Sigma;      Sigma=NULL;
+  //
   delete[] AuxPos;     AuxPos=NULL;
   delete[] AuxVel;     AuxVel=NULL;
   delete[] AuxRhop;    AuxRhop=NULL;
   delete[] AuxNN;	     AuxNN=NULL; //<vs_non-Newtonian>
   delete[] VolFrac;    VolFrac=NULL;
   delete[] Sigma;      Sigma=NULL;
-
+  //ruofeng
+  delete[] AuxSigma_xx_yy_zz;   AuxSigma_xx_yy_zz=NULL;
+  delete[] AuxSigma_xy_yz_xz;   AuxSigma_xy_yz_xz=NULL;
 }
 
 //==============================================================================
@@ -298,10 +308,17 @@ void JSphGpu::AllocCpuMemoryParticles(unsigned np){
       Posxy=new tdouble2[np];    MemCpuParticles+=sizeof(tdouble2)*np;
       Posz=new double[np];       MemCpuParticles+=sizeof(double)*np;
       Velrhop=new tfloat4[np];   MemCpuParticles+=sizeof(tfloat4)*np;
+      //=========mdbr
+	    Sigma=new tsymatrix3f[np]; MemCpuParticles+=sizeof(tsymatrix3f)*np;
+      //==========
       AuxPos=new tdouble3[np];   MemCpuParticles+=sizeof(tdouble3)*np; 
       AuxVel=new tfloat3[np];    MemCpuParticles+=sizeof(tfloat3)*np;
       AuxRhop=new float[np];     MemCpuParticles+=sizeof(float)*np;
       AuxNN=new float[np];       MemCpuParticles+=sizeof(float)*np; //<vs_non-Newtonian>
+      //======mdbr
+      AuxSigma_xx_yy_zz = new tfloat3[np]; MemCpuParticles+=sizeof(tfloat3)*np;
+      AuxSigma_xy_yz_xz = new tfloat3[np]; MemCpuParticles+=sizeof(tfloat3)*np;
+      //======
       VolFrac=new float[np];      MemCpuParticles+=sizeof(float)*np;
       Sigma=new tfloat3[np];     MemCpuParticles+=sizeof(tfloat3)*np;
     }
@@ -344,12 +361,19 @@ void JSphGpu::AllocGpuMemoryParticles(unsigned np,float over){
   ArraysGpu->AddArrayCount(JArraysGpu::SIZE_12B,1); //-ace
   ArraysGpu->AddArrayCount(JArraysGpu::SIZE_16B,5); //-velrhop,posxy,poscell
   ArraysGpu->AddArrayCount(JArraysGpu::SIZE_8B,2);  //-posz
+  //====== mdbr
+  ArraysGpu->AddArrayCount(JArraysGpu::SIZE_24B, 2);//-sigma
+  ArraysGpu->AddArrayCount(JArraysGpu::SIZE_24B, 1);//-rsigma
   if(TStep==STEP_Verlet){
     ArraysGpu->AddArrayCount(JArraysGpu::SIZE_16B,1); //-velrhopm1
+    //====mdbr
+    ArraysGpu->AddArrayCount(JArraysGpu::SIZE_24B, 1);//-sigmam1
   }
   else if(TStep==STEP_Symplectic){
     ArraysGpu->AddArrayCount(JArraysGpu::SIZE_8B,1);  //-poszpre
     ArraysGpu->AddArrayCount(JArraysGpu::SIZE_16B,2); //-posxypre,velrhoppre
+    //====mdbr
+    ArraysGpu->AddArrayCount(JArraysGpu::SIZE_24B, 1);//-sigmapre
   }
   if (TVisco != VISCO_Artificial) { //<vs_non-Newtonian>   
 	  ArraysGpu->AddArrayCount(JArraysGpu::SIZE_24B,3); //-SpsTau,SpsGradvel, Pstrain
@@ -406,6 +430,11 @@ void JSphGpu::ResizeGpuMemoryParticles(unsigned npnew){
   float3      *boundnormal=SaveArrayGpu(Np,BoundNormalg);
   float3      *motionvel  =SaveArrayGpu(Np,MotionVelg);
   float       *auxnn			=SaveArrayGpu(Np,AuxNNg);  //<vs_non-Newtonian>
+  //==mdbr
+  tsymatrix3f* sigma = SaveArrayGpu(Np, Sigmag);
+  tsymatrix3f* sigmapre = SaveArrayGpu(Np, SigmaPreg);
+  tsymatrix3f* sigmam1 = SaveArrayGpu(Np, SigmaM1g);
+  // 
   //-Frees pointers.
   ArraysGpu->Free(Idpg);
   ArraysGpu->Free(Codeg);
@@ -423,6 +452,10 @@ void JSphGpu::ResizeGpuMemoryParticles(unsigned npnew){
   ArraysGpu->Free(BoundNormalg);
   ArraysGpu->Free(MotionVelg);
   ArraysGpu->Free(AuxNNg); //<vs_non-Newtonian>
+  //-mdbr
+  ArraysGpu->Free(Sigmag);
+  ArraysGpu->Free(SigmaPreg);
+  ArraysGpu->Free(SigmaM1g);
   //-Resizes GPU memory allocation.
   const double mbparticle=(double(MemGpuParticles)/(1024*1024))/GpuParticlesSize; //-MB por particula.
   Log->Printf("**JSphGpu: Requesting gpu memory for %u particles: %.1f MB.",npnew,mbparticle*npnew);
@@ -444,6 +477,11 @@ void JSphGpu::ResizeGpuMemoryParticles(unsigned npnew){
   if(boundnormal)BoundNormalg=ArraysGpu->ReserveFloat3();
   if(motionvel)  MotionVelg  =ArraysGpu->ReserveFloat3();
   if(auxnn)		AuxNNg	       = ArraysGpu->ReserveFloat();  //<vs_non-Newtonian>
+  //--mdbr
+  if(sigma)      Sigmag = ArraysGpu->ReserveSymatrix3f();
+  if(sigmapre)   SigmaPreg = ArraysGpu->ReserveSymatrix3f();
+  if(sigmam1)      SigmaM1g = ArraysGpu->ReserveSymatrix3f();
+  // 
   //-Restore data in GPU memory.
   RestoreArrayGpu(Np,idp,Idpg);
   RestoreArrayGpu(Np,code,Codeg);
@@ -461,6 +499,11 @@ void JSphGpu::ResizeGpuMemoryParticles(unsigned npnew){
   RestoreArrayGpu(Np,boundnormal,BoundNormalg);
   RestoreArrayGpu(Np,motionvel,MotionVelg);
   RestoreArrayGpu(Np,auxnn,AuxNNg);	            //<vs_non-Newtonian>
+  //---mdbr
+  RestoreArrayGpu(Np,sigma,Sigmag);
+  RestoreArrayGpu(Np,sigmam1,SigmaM1g);
+  RestoreArrayGpu(Np,sigmapre,SigmaPreg);
+  // 
   //-Updates values.
   GpuParticlesAllocs++;
   GpuParticlesSize=npnew;
@@ -504,7 +547,11 @@ void JSphGpu::ReserveBasicArraysGpu(){
   Poszg=ArraysGpu->ReserveDouble();
   PosCellg=ArraysGpu->ReserveFloat4();
   Velrhopg=ArraysGpu->ReserveFloat4();
-  if(TStep==STEP_Verlet)VelrhopM1g=ArraysGpu->ReserveFloat4();
+  //mdbr
+  Sigmag = ArraysGpu->ReserveSymatrix3f();
+  if(TStep==STEP_Verlet){VelrhopM1g=ArraysGpu->ReserveFloat4();
+  SigmaM1g = ArraysGpu->ReserveSymatrix3f();//mdbr
+  }
 
   if(MultiPhase)AuxNNg=ArraysGpu->ReserveFloat();  //<vs_non-Newtonian>
   if(!MultiPhase && TVisco==VISCO_LaminarSPS)SpsTaug=ArraysGpu->ReserveSymatrix3f();  //<vs_non-Newtonian>
@@ -622,6 +669,9 @@ void JSphGpu::ParticlesDataUp(unsigned n,const tfloat3 *boundnormal){
   cudaMemcpy(Posxyg  ,Posxy  ,sizeof(double2)*n ,cudaMemcpyHostToDevice);
   cudaMemcpy(Poszg   ,Posz   ,sizeof(double)*n  ,cudaMemcpyHostToDevice);
   cudaMemcpy(Velrhopg,Velrhop,sizeof(float4)*n  ,cudaMemcpyHostToDevice);
+  //===mdbr
+  cudaMemcpy(Sigmag, Sigma, sizeof(tsymatrix3f)*n, cudaMemcpyHostToDevice);
+  //====
   if(UseNormals)cudaMemcpy(BoundNormalg,boundnormal,sizeof(float3)*n,cudaMemcpyHostToDevice);
   if(MultiPhase && TVisco!=VISCO_SoilWater)cudaMemcpy(AuxNNg,AuxNN,sizeof(float)*n,cudaMemcpyHostToDevice); //<vs_non-Newtonian>
   if(TVisco== VISCO_SoilWater){
@@ -649,6 +699,9 @@ unsigned JSphGpu::ParticlesDataDown(unsigned n,unsigned pini,bool code,bool only
   cudaMemcpy(Posz   ,Poszg   +pini,sizeof(double)  *n,cudaMemcpyDeviceToHost);
   cudaMemcpy(Velrhop,Velrhopg+pini,sizeof(float4)  *n,cudaMemcpyDeviceToHost);
   if(code || onlynormal)cudaMemcpy(Code,Codeg+pini,sizeof(typecode)*n,cudaMemcpyDeviceToHost);
+  //==mdbr
+  cudaMemcpy(Sigma,Sigmag+pini,sizeof(tsymatrix3f)*n,cudaMemcpyDeviceToHost);
+  // 
   if (TVisco == VISCO_SoilWater) {
       //cusph::DownloadSpsTau(Np, Npb, SpsTaug, Sigmag);
       cudaMemcpy(Sigma, Sigmag + pini, sizeof(float3) * n, cudaMemcpyDeviceToHost);
@@ -669,6 +722,8 @@ unsigned JSphGpu::ParticlesDataDown(unsigned n,unsigned pini,bool code,bool only
         Velrhop[p-ndel]=Velrhop[p];
         Code[p-ndel]   =Code[p];
 				//if(aux)AuxNN[p - ndel] = AuxNN[p];
+        //==== mdbr
+		    Sigma[p-ndel]  =Sigma[p];
         if (TVisco == VISCO_SoilWater) {
             Sigma[p - ndel] = Sigma[p];
             VolFrac[p-ndel]=VolFrac[p];
@@ -684,6 +739,9 @@ unsigned JSphGpu::ParticlesDataDown(unsigned n,unsigned pini,bool code,bool only
     AuxPos[p]=TDouble3(Posxy[p].x,Posxy[p].y,Posz[p]);
     AuxVel[p]=TFloat3(Velrhop[p].x,Velrhop[p].y,Velrhop[p].z);
     AuxRhop[p]=Velrhop[p].w;
+    //==== mdbr
+    AuxSigma_xx_yy_zz[p]=TFloat3(Sigma[p].xx,Sigma[p].yy,Sigma[p].zz);
+    AuxSigma_xy_yz_xz[p]=TFloat3(Sigma[p].xy,Sigma[p].yz,Sigma[p].xz);
   }
   return(num);
 }
@@ -903,7 +961,10 @@ void JSphGpu::InitRunGpu(){
   ParticlesDataDown(Np,0,false,false);
   InitRun(Np,Idp,AuxPos);
 
-  if(TStep==STEP_Verlet)cudaMemcpy(VelrhopM1g,Velrhopg,sizeof(float4)*Np,cudaMemcpyDeviceToDevice);
+  if(TStep==STEP_Verlet){cudaMemcpy(VelrhopM1g,Velrhopg,sizeof(float4)*Np,cudaMemcpyDeviceToDevice);
+  //======mdbr
+   cudaMemcpy(SigmaM1g,Sigmag,sizeof(tsymatrix3f)*Np,cudaMemcpyDeviceToDevice);
+  }
   if(!MultiPhase && TVisco==VISCO_LaminarSPS)cudaMemset(SpsTaug,0,sizeof(tsymatrix3f)*Np); //<vs_non-Newtonian>
   if(TVisco==VISCO_SoilWater){
       cudaMemset(SpsTaug,0,sizeof(tsymatrix3f)*Np); //<vs_non-Newtonian>
@@ -928,6 +989,9 @@ void JSphGpu::PreInteractionVars_Forces(unsigned np,unsigned npb){
   cudaMemset(Arg,0,sizeof(float)*np);                                    //Arg[]=0
   if(Deltag)cudaMemset(Deltag,0,sizeof(float)*np);                       //Deltag[]=0
   cudaMemset(Aceg,0,sizeof(tfloat3)*np);                                 //Aceg[]=(0,0,0)
+  //====mdbr
+  cudaMemset(Rsigmag,0,sizeof(tsymatrix3f)*np);
+  //======
   //-Select particles for shifting.
   if(ShiftPosfsg)Shifting->InitGpu(npf,npb,Posxyg,Poszg,ShiftPosfsg);
   //<vs_non-Newtonian>
@@ -954,6 +1018,7 @@ void JSphGpu::PreInteraction_Forces(){
   if(MultiPhase)ViscEtaDtg=ArraysGpu->ReserveFloat(); //<vs_non-Newtonian>
   Arg=ArraysGpu->ReserveFloat();
   Aceg=ArraysGpu->ReserveFloat3();
+  Rsigmag=ArraysGpu->ReserveSymatrix3f();//ruofeng
   if(DDTArray)Deltag=ArraysGpu->ReserveFloat();
   if(Shifting)ShiftPosfsg=ArraysGpu->ReserveFloat4();
 
@@ -994,6 +1059,7 @@ void JSphGpu::PosInteraction_Forces(){
   ArraysGpu->Free(Deltag);       Deltag=NULL;
   ArraysGpu->Free(ShiftPosfsg);  ShiftPosfsg=NULL;
   ArraysGpu->Free(SpsGradvelg);  SpsGradvelg=NULL;
+  ArraysGpu->Free(Rsigmag);      Rsigmag=NULL;//ruofeng
   //<vs_non-Newtonian>  
   if(MultiPhase) {
     ArraysGpu->Free(D_tensorg);	 D_tensorg=NULL;
@@ -1037,6 +1103,7 @@ void JSphGpu::ComputeVerlet(double dt){  //pdtedom
   //-The new values are calculated in VelRhopM1g.
   //-Los nuevos valores se calculan en VelrhopM1g.
   swap(Velrhopg,VelrhopM1g);   //-Exchanges Velrhopg and VelrhopM1g. | Intercambia Velrhopg y VelrhopM1g.
+  //swap(Sigmag, SigmaM1g);
   //-Applies displacement to non-periodic fluid particles.
   //-Aplica desplazamiento a las particulas fluid no periodicas.
   cusph::ComputeStepPos(PeriActive,WithFloating,Np,Npb,movxyg,movzg,Posxyg,Poszg,Dcellg,Codeg);
@@ -1058,11 +1125,15 @@ void JSphGpu::ComputeSymplecticPre(double dt){
   PosxyPreg=ArraysGpu->ReserveDouble2();
   PoszPreg=ArraysGpu->ReserveDouble();
   VelrhopPreg=ArraysGpu->ReserveFloat4();
+  //==== mdbr
+  SigmaPreg = ArraysGpu->ReserveSymatrix3f();
   //-Changes data of PRE variables for calculating the new data.
   //-Cambia datos a variables PRE para calcular nuevos datos.
   swap(PosxyPreg,Posxyg);      //-PosxyPre[] <= Posxy[]
   swap(PoszPreg,Poszg);        //-PoszPre[] <= Posz[]
   swap(VelrhopPreg,Velrhopg);  //-VelrhopPre[] <= Velrhop[]
+  //==== mdbr
+  swap(SigmaPreg, Sigmag);
   //-Allocate memory to compute the diplacement.
   double2 *movxyg=ArraysGpu->ReserveDouble2();
   double *movzg=ArraysGpu->ReserveDouble();
@@ -1070,8 +1141,8 @@ void JSphGpu::ComputeSymplecticPre(double dt){
   const double dt05=dt*.5;
   const float3 *indirvel=(InOut? InOut->GetDirVelg(): NULL);
   cusphs::ComputeStepSymplecticPre(WithFloating,shift,inout,Np,Npb,VelrhopPreg,Arg
-    ,Aceg,ShiftPosfsg,indirvel,dt05,RhopZero,RhopOutMin,RhopOutMax,Gravity
-    ,Codeg,movxyg,movzg,Velrhopg,NULL);
+    ,Aceg,ShiftPosfsg,SigmaPreg,Rsigmag,indirvel,dt05,RhopZero,RhopOutMin,RhopOutMax,Gravity
+    ,Codeg,movxyg,movzg,Velrhopg,Sigmag,NULL);
   //-Applies displacement to non-periodic fluid particles.
   //-Aplica desplazamiento a las particulas fluid no periodicas.
   cusph::ComputeStepPos2(PeriActive,WithFloating,Np,Npb,PosxyPreg,PoszPreg
@@ -1101,8 +1172,8 @@ void JSphGpu::ComputeSymplecticCorr(double dt){
   const double dt05=dt*.5;
   const float3 *indirvel=(InOut? InOut->GetDirVelg(): NULL);
   cusphs::ComputeStepSymplecticCor(WithFloating,shift,inout,Np,Npb,VelrhopPreg
-    ,Arg,Aceg,ShiftPosfsg,indirvel,dt05,dt,RhopZero,RhopOutMin,RhopOutMax,Gravity
-    ,Codeg,movxyg,movzg,Velrhopg,NULL);
+    ,Arg,Aceg,ShiftPosfsg,SigmaPreg,Rsigmag,indirvel,dt05,dt,RhopZero,RhopOutMin,RhopOutMax,Gravity
+    ,Codeg,movxyg,movzg,Velrhopg,Sigmag,NULL);
   //-Applies displacement to non-periodic fluid particles.
   //-Aplica desplazamiento a las particulas fluid no periodicas.
   cusph::ComputeStepPos2(PeriActive,WithFloating,Np,Npb,PosxyPreg,PoszPreg
@@ -1114,6 +1185,9 @@ void JSphGpu::ComputeSymplecticCorr(double dt){
   ArraysGpu->Free(PosxyPreg);    PosxyPreg=NULL;
   ArraysGpu->Free(PoszPreg);     PoszPreg=NULL;
   ArraysGpu->Free(VelrhopPreg);  VelrhopPreg=NULL;
+  //==== mdbr
+  ArraysGpu->Free(SigmaPreg);	SigmaPreg = NULL;
+  //====
   TmgStop(Timers,TMG_SuComputeStep);
 }
 

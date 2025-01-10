@@ -413,6 +413,164 @@ __device__ void GetStressTensorMultilayerSoil_sym(float2 &d_rate_xx_xy,float2 &d
 /// Calculates the Stress Tensor for the soil phase in Multilayer module (symetric)
 //==============================================================================
 
+//==============================================================================
+/// Perform return mapping with DruckPrager Yeild Criterion
+/// Input Current Elastic Stress, DruckPrager Parameters, Ouput EP Stress, Plastic Strain
+/// Note that the inverse of elastic stiffness matrix is needed for plastic strain 
+//==============================================================================
+__device__ void GetStressTensor_PlasticCorrector(float2 &sigma_xx_xy,float2 &sigma_xz_yy,float2 &sigma_yz_zz, float2 &ep_tensor_xx_xy, float2 &ep_tensor_xz_yy, float2 &ep_tensor_yz_zz
+, const float DP_K, const float DP_G,const float MC_phi, const float MC_c, const float MC_psi)
+{
+		// Get elastic stress tensor (obtained in time integration at previous timestep)
+		float2 tsigmap1_xx_xy = sigma_xx_xy;
+		float2 tsigmap1_xz_yy = sigma_xz_yy;
+		float2 tsigmap1_yz_zz = sigma_yz_zz;
+
+    // Store current plastic strain ep in a temporary variable ep_temp
+    float2 ep_temp_xx_xy=ep_tensor_xx_xy;
+    float2 ep_temp_xz_yy=ep_tensor_xz_yy;
+    float2 ep_temp_yz_zz=ep_tensor_yz_zz;
+
+    // Build the inversed elastic stiffness matrix for evaluating plastic strain  
+    float K4G3 = float(DP_K + 4.*DP_G / 3.);
+	  float K2G3 = float(DP_K - 2.*DP_G / 3.); 
+	  float invK4G3 = (K2G3 + K4G3) / (-2 * K2G3*K2G3 + K2G3*K4G3 + K4G3*K4G3);
+	  float invK2G3 = -K2G3 / (-2 * K2G3*K2G3 + K2G3*K4G3 + K4G3*K4G3);
+	  float invm_a11 = invK4G3; float invm_a12 = invK2G3; float invm_a13 = invK2G3;
+	  float invm_a21 = invK2G3; float invm_a22 = invK4G3; float invm_a23 = invK2G3;
+	  float invm_a31 = invK2G3; float invm_a32 = invK2G3; float invm_a33 = invK4G3;
+    
+    // Evaluation yield condition
+    float DP_AlphaPhi = tan(MC_phi) / sqrt(9. + 12.*tan(MC_phi)*tan(MC_phi)); // Use MC phi and c to calculate DP parameters for the yield criterion, need to check plane strain/stress or other conditions.
+    float DP_kc = 3.* MC_c / sqrt(9. + 12.*tan(MC_phi)*tan(MC_phi)); 
+    float DP_psi = tan(MC_psi) / sqrt(9. + 12. * tan(MC_psi)*tan(MC_psi)); // Use MC psi (dilation angle) to calculate DP dilation angle for the flow rule
+    float I1_t, J2_t, f;
+    GetStressInvariant(I1_t, J2_t, tsigmap1_xx_xy.x, tsigmap1_xx_xy.y, tsigmap1_xz_yy.x, tsigmap1_xz_yy.y, tsigmap1_yz_zz.x, tsigmap1_yz_zz.y);
+    GetDPYieldFunction(f, J2_t, I1_t, DP_psi, DP_kc); // Calculate yield function f 
+
+		// Plastic corrector if violates yield condition
+		if (f > 1e-5f) {
+			int iter = 0;
+			while (abs(f) > 1e-5f) {
+				if (iter++ > 80) break;
+          float dlambda = f /(9.*DP_K*DP_AlphaPhi*DP_psi + DP_G); //Plastic multiplier
+          float GJ2 = DP_G/sqrt(J2_t);
+          //evaluate De : plastic potential
+          float Deppxx = 3*DP_K * DP_psi + GJ2 * (tsigmap1_xx_xy.x - I1_t/3.); // Need to check if this is derived correctly
+          float Deppyy = 3*DP_K * DP_psi + GJ2 * (tsigmap1_xz_yy.y - I1_t/3.);
+          float Deppzz = 3*DP_K * DP_psi + GJ2 * (tsigmap1_yz_zz.y - I1_t/3.);
+          float Deppxy = GJ2 * tsigmap1_xx_xy.y;
+          float Deppxz = GJ2 * tsigmap1_xz_yy.x;
+          float Deppyz = GJ2 * tsigmap1_yz_zz.x;
+          // Calculate increment of plastic stress increment dsigmap= dlambda * pp
+          float dsigmap_xx = dlambda * Deppxx;
+          float dsigmap_yy = dlambda * Deppyy;
+          float dsigmap_zz = dlambda * Deppzz;
+          float dsigmap_xy = dlambda * Deppxy;
+          float dsigmap_xz = dlambda * Deppxz;
+          float dsigmap_yz = dlambda * Deppyz;
+          // Update elastic-plastic stress
+          tsigmap1_xx_xy.x -= dsigmap_xx;    tsigmap1_xx_xy.y -= dsigmap_xy;
+          tsigmap1_xz_yy.x -= dsigmap_xz;    tsigmap1_xz_yy.y -= dsigmap_yy;
+          tsigmap1_yz_zz.x -= dsigmap_yz;    tsigmap1_yz_zz.y -= dsigmap_zz;
+          // Plastic strain increment dep = invD * dsigmap
+		      float dep_xx, dep_yy, dep_zz, dep_yz, dep_xz, dep_xy;
+          dep_xx = invm_a11*dsigmap_xx + invm_a12*dsigmap_yy + invm_a13*dsigmap_zz;
+			    dep_yy = invm_a21*dsigmap_xx + invm_a22*dsigmap_yy + invm_a23*dsigmap_zz;
+			    dep_zz = invm_a31*dsigmap_xx + invm_a32*dsigmap_yy + invm_a33*dsigmap_zz;
+			    dep_xy = 0.5f/DP_G*dsigmap_xy;
+			    dep_yz = 0.5f/DP_G*dsigmap_yz;
+			    dep_xz = 0.5f/DP_G*dsigmap_xz;
+          //Update plastic strain
+          ep_temp_xx_xy.x += dep_xx;     ep_temp_xx_xy.y += dep_xy;     ep_temp_xz_yy.x += dep_xz;
+          ep_temp_xz_yy.y += dep_yy;     ep_temp_yz_zz.x += dep_yz;
+          ep_temp_yz_zz.y += dep_zz;
+          // Check updated f
+          GetStressInvariant(I1_t, J2_t, tsigmap1_xx_xy.x, tsigmap1_xx_xy.y, tsigmap1_xz_yy.x, tsigmap1_xz_yy.y, tsigmap1_yz_zz.x, tsigmap1_yz_zz.y);
+          GetDPYieldFunction(f, J2_t, I1_t, DP_AlphaPhi, DP_kc); // Update yield function f 
+          iter += 1;
+			}
+		}
+    ep_tensor_xx_xy.x = ep_temp_xx_xy.x; ep_tensor_xx_xy.y = ep_temp_xx_xy.y; 
+    ep_tensor_xz_yy.x = ep_temp_xz_yy.x; ep_tensor_xz_yy.y = ep_temp_xz_yy.y; 
+    ep_tensor_yz_zz.x = ep_temp_yz_zz.x; ep_tensor_yz_zz.y = ep_temp_yz_zz.y;
+		sigma_xx_xy = make_float2(tsigmap1_xx_xy.x, tsigmap1_xx_xy.y);
+		sigma_xz_yy = make_float2(tsigmap1_xz_yy.x, tsigmap1_xz_yy.y);
+		sigma_yz_zz = make_float2(tsigmap1_yz_zz.x, tsigmap1_yz_zz.y);
+}
+
+//==============================================================================
+/// Calculate strain/spin rate tensor
+/// Input velgradient (3*3); Ouput strain (3*2)/spin (3*1) rate tensor
+//==============================================================================
+__device__ void GetStrainSpinRateTensor_sym(float3 gradvp1_xx_xy_xz,float3 gradvp1_yx_yy_yz,float3 gradvp1_zx_zy_zz
+  ,float2 &e_tensor_xx_xy,float2 &e_tensor_xz_yy,float2 &e_tensor_yz_zz,float3 &w_tensor_xy_yz_xz)
+{
+  //Build strain rate tensor
+  float e_tensor_xx_xy.x=gradvp1_xx_xy_xz.x;		
+  float e_tensor_xz_yy.y=gradvp1_yx_yy_yz.y;	  
+  float e_tensor_yz_zz.y=gradvp1_zx_zy_zz.z;
+  float e_tensor_xx_xy.y=0.5f*(gradvp1_xx_xy_xz.y+gradvp1_yx_yy_yz.x);
+  float e_tensor_yz_zz.x=0.5f*(gradvp1_yx_yy_yz.z+gradvp1_zx_zy_zz.y);
+  float e_tensor_xz_yy.x=0.5f*(gradvp1_xx_xy_xz.z+gradvp1_zx_zy_zz.x);
+
+  //Build spin rate tensor
+  float w_tensor_xy_yz_xz.x = 0.5f*(gradvp1_xx_xy_xz.y-gradvp1_yx_yy_yz.x);
+  float w_tensor_xy_yz_xz.y = 0.5f*(gradvp1_yx_yy_yz.z-gradvp1_zx_zy_zz.y);
+  float w_tensor_xy_yz_xz.z = 0.5f*(gradvp1_xx_xy_xz.z-gradvp1_zx_zy_zz.x);
+}
+
+//==============================================================================
+/// Calculate elastic stress rate tensor
+/// Input Strain/Spin Rate, Elastic Parameters, Stress, Ouput Elastic Stress Rate Tensor
+//==============================================================================
+__device__ void GetStressRateTensor_Elastic(float2 e_tensor_xx_xy,float2 e_tensor_xz_yy,float2 e_tensor_yz_zz,float3 w_tensor_xy_yz_xz
+,float2 sigma_xx_xy,float2 sigma_xz_yy,float2 sigma_yz_zz
+,const float DP_K, const float DP_G
+,float2 &rsigma_xx_xy,float2 &rsigma_xz_yy,float2 &rsigma_yz_zz)
+{
+  //Build Elastic stiffness matrix
+	float K4G3 = float(DP_K + 4.*DP_G / 3.);
+	float K2G3 = float(DP_K - 2.*DP_G / 3.);
+	float m_a11 = K4G3; float m_a12 = K2G3; float m_a13 = K2G3;
+	float m_a21 = K2G3; float m_a22 = K4G3; float m_a23 = K2G3;
+	float m_a31 = K2G3; float m_a32 = K2G3; float m_a33 = K4G3; 
+
+  //Get stress, stran rate and spin rate
+  float sigmaxx = sigma_xx_xy.x;
+  float sigmaxy = sigma_xx_xy.y;
+  float sigmaxz = sigma_xz_yy.x;
+  float sigmayy = sigma_xz_yy.y;
+  float sigmayz = sigma_yz_zz.x;
+  float sigmazz = sigma_yz_zz.y;
+
+  float exx = e_tensor_xx_xy.x;
+  float exy = e_tensor_xx_xy.y;
+  float exz = e_tensor_xz_yy.x;
+  float eyy = e_tensor_xz_yy.y;
+  float eyz = e_tensor_yz_zz.x;
+  float ezz = e_tensor_yz_zz.y;
+
+  float wxy = w_tensor_xy_yz_xz.x;
+  float wyz = w_tensor_xy_yz_xz.y;
+  float wxz = w_tensor_xy_yz_xz.z;
+  
+  //Jaumann stress rate
+  float Jxx = - 2.f*sigmaxy*wxy - 2.f*sigmaxz*wxz;
+  float Jxy = sigmaxx*wxy - sigmayy*wxy - sigmaxz*wyz - sigmayz*wxz;
+  float Jxz = sigmaxx*wxz + sigmaxy*wyz - sigmayz*wxy - sigmazz*wxz;
+  float Jyy = 2.f*sigmaxy*wxy - 2.f*sigmayz*wyz;
+  float Jyz = sigmaxy*wxz + sigmaxz*wxy + sigmayy*wyz - sigmazz*wyz;
+  float Jzz = 2.f*sigmaxz*wxz + 2.f*sigmayz*wyz;
+ 
+  //Construct stress rate equation
+  rsigma_xx_xy.x = (m_a11*exx+m_a12*eyy+m_a13*ezz);//+Jxx
+  rsigma_xz_yy.y = (m_a21*exx+m_a22*eyy+m_a23*ezz);//+Jyy
+  rsigma_yz_zz.y = (m_a31*exx+m_a32*eyy+m_a33*ezz);//+Jzz
+  rsigma_xx_xy.y = 2.f*DP_G*exy;//+Jxy
+  rsigma_yz_zz.x = 2.f*DP_G*eyz;//+Jyz
+  rsigma_xz_yy.x = 2.f*DP_G*exz;//+Jxz  
+}
 
 //==============================================================================
 /// Calculates the Strain Rate Tensor (symetric).
@@ -462,6 +620,21 @@ __device__ void GetStrainSpinRateTensor(float2 &dvelp1_xx_xy,float2 &dvelp1_xz_y
   W_tensor_xyz.y = 0.5f*(dvelp1_xx_xy_xz.z-dvelp1_zx_zy_zz.x);
   W_tensor_xyz.z = 0.5f*(dvelp1_yx_yy_yz.z-dvelp1_zx_zy_zz.y);
 }
+
+//==============================================================================
+/// Velocity gradients using SPH approach (No sym is considered)
+/// Gradientes de velocidad usando SPH.
+//==============================================================================
+__device__ void GetVelocityGradients_SPH(float massp2,const float4 &velrhop2,float dvx,float dvy,float dvz,float frx,float fry,float frz
+  ,float3 &grap1_xx_xy_xz,float3 &grap1_yx_yy_yz,float3 &grap1_zx_zy_zz)
+{
+  ///SPH vel gradients calculation
+  const float volp2=-massp2/velrhop2.w;
+  float dv=dvx*volp2;  grap1_xx_xy_xz.x+=dv*frx; grap1_xx_xy_xz.y+=dv*fry; grap1_xx_xy_xz.z+=dv*frz;
+        dv=dvy*volp2;  grap1_yx_yy_yz.x+=dv*frx; grap1_yx_yy_yz.y+=dv*fry; grap1_yx_yy_yz.z+=dv*frz;
+        dv=dvz*volp2;  grap1_zx_zy_zz.x+=dv*frx; grap1_zx_zy_zz.y+=dv*fry; grap1_zx_zy_zz.z+=dv*frz;
+}
+
 
 //==============================================================================
 /// Velocity gradients using SPH approach.

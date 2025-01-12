@@ -305,6 +305,8 @@ void ComputeDampingPla(double dt,tdouble4 plane,float dist,float over,tfloat3 fa
   ,unsigned n,unsigned pini,const double2 *posxy,const double *posz,const typecode *code
   ,float4 *velrhop);
 
+void InitializeVolFracRhoTauPstrain(unsigned np,unsigned npb,const typecode *code, tsymatrix3f *tau, tsymatrix3f *Pstraing, float4 *Velrhopg,float *VolFracg,TpVisco tvisco, cudaStream_t stm=NULL);
+
 }
 
 

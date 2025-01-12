@@ -910,8 +910,8 @@ void JSphGpu::InitRunGpu(){
       //cudaMemset(Forceg,0,sizeof(float3)*Np);
       cudaMemset(Pstraing,0,sizeof(tsymatrix3f)*Np);
       cudaMemset(VolFracg,0,sizeof(float)*Np);
-      //cusph::InitializeVolFracRhoTauPstain(Np,Npb,Codeg,SpsTaug,Pstraing, Velrhopg,VolFracg,TVisco); //NEED TO ADD
-  }
+      cusph::InitializeVolFracRhoTauPstrain(Np,Npb,Codeg,SpsTaug,Pstraing,Velrhopg,VolFracg,TVisco); //Need to be updated
+  }          
   if(CaseNfloat)InitFloating();
   if(MotionVelg)cudaMemset(MotionVelg,0,sizeof(float3)*Np);
   Check_CudaErroor("Failed initializing variables for execution.");

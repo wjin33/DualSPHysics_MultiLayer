@@ -8,22 +8,20 @@ USE_NATIVE_CPU_OPTIMIZATIONS=NO
 COMPILE_VTKLIB=YES
 COMPILE_NUMEXLIB=YES
 COMPILE_CHRONO=NO
-COMPILE_CHRONO_OMP=NO
 COMPILE_WAVEGEN=NO
 COMPILE_MOORDYN=NO
 
 LIBS_DIRECTORIES=-L./
 LIBS_DIRECTORIES:=$(LIBS_DIRECTORIES) -L../lib/linux_gcc
 
-EXECNAME=DualSPHysics5.0_GPU_multilayer0505_linux64
+EXECNAME=DualSPHysics5.0_NNewtonian_linux64
 EXECS_DIRECTORY=../../../bin/linux
 
 # -std=c++0x ---> Used to avoid errors for calls to enums
 ifeq ($(USE_DEBUG), YES)
-  CCFLAGS=-c -O0 -g -Wall -fopenmp -D_WITHGPU -std=c++0x -w
-#   CCFLAGS=-c -g -Wall -fopenmp -D_WITHGPU -std=c++0x
+  CCFLAGS=-c -O0 -g -Wall -fopenmp -D_WITHGPU -std=c++0x
 else
-  CCFLAGS=-c -O3 -fopenmp -D_WITHGPU -std=c++0x -w
+  CCFLAGS=-c -O3 -fopenmp -D_WITHGPU -std=c++0x
   ifeq ($(USE_FAST_MATH), YES)
     CCFLAGS+= -ffast-math
   endif
@@ -48,11 +46,7 @@ ifeq ($(COMPILE_NUMEXLIB), NO)
   CCMOREFLAGS:=$(CCMOREFLAGS) -DDISABLE_NUMEXLIB
 endif
 ifeq ($(COMPILE_CHRONO), NO)
-  COMPILE_CHRONO_OMP=NO
   CCFLAGS:=$(CCFLAGS) -DDISABLE_CHRONO
-endif
-ifeq ($(COMPILE_CHRONO_OMP), NO)
-  CCFLAGS:=$(CCFLAGS) -DDISABLE_CHRONO_OMP
 endif
 ifeq ($(COMPILE_WAVEGEN), NO)
   CCFLAGS:=$(CCFLAGS) -DDISABLE_WAVEGEN
@@ -62,7 +56,7 @@ ifeq ($(COMPILE_MOORDYN), NO)
 endif
 
 #=============== CUDA selection ===============
-CUDAVER=114
+CUDAVER=122
 
 #=============== CUDA toolkit directory (make appropriate for local CUDA installation) ===============
 ifeq ($(CUDAVER),00)
@@ -77,8 +71,8 @@ endif
 ifeq ($(CUDAVER),92)
   DIRTOOLKIT=/exports/opt/NVIDIA/cuda-9.2
 endif
-ifeq ($(CUDAVER),114)
-  DIRTOOLKIT=/usr/local/cuda-11.4
+ifeq ($(CUDAVER),122)
+  DIRTOOLKIT=/exports/opt/NVIDIA/cuda-12.2
 endif
 #=============== Select GPU architectures ===============
 ifeq ($(CUDAVER),00)
@@ -110,18 +104,13 @@ ifeq ($(CUDAVER),92)
   GENCODE:=$(GENCODE) -gencode=arch=compute_61,code=\"sm_61,compute_61\"
   GENCODE:=$(GENCODE) -gencode=arch=compute_70,code=\"sm_70,compute_70\"
 endif
-ifeq ($(CUDAVER),114)
-  # module load cuda/9.2
-  # GENCODE:=$(GENCODE) -gencode=arch=compute_30,code=\"sm_30,compute_30\"
-  # GENCODE:=$(GENCODE) -gencode=arch=compute_35,code=\"sm_35,compute_35\"
-  # GENCODE:=$(GENCODE) -gencode=arch=compute_50,code=\"sm_50,compute_50\"
-  # GENCODE:=$(GENCODE) -gencode=arch=compute_52,code=\"sm_52,compute_52\"
-  # GENCODE:=$(GENCODE) -gencode=arch=compute_61,code=\"sm_61,compute_61\"
+ifeq ($(CUDAVER),122)
   GENCODE:=$(GENCODE) -gencode=arch=compute_70,code=\"sm_70,compute_70\"
   GENCODE:=$(GENCODE) -gencode=arch=compute_75,code=\"sm_75,compute_75\"
-  # GENCODE:=$(GENCODE) -gencode=arch=compute_80,code=\"sm_80,compute_80\"
-  # GENCODE:=$(GENCODE) -gencode=arch=compute_86,code=\"sm_86,compute_86\"
+  GENCODE:=$(GENCODE) -gencode=arch=compute_80,code=\"sm_80,compute_80\"
+  GENCODE:=$(GENCODE) -gencode=arch=compute_86,code=\"sm_86,compute_86\"
 endif
+
 
 #=============== Files to compile ===============
 OBJXML=JXml.o tinystr.o tinyxml.o tinyxmlerror.o tinyxmlparser.o
@@ -134,7 +123,6 @@ OBCOMMONGPU=FunctionsCuda.o JObjectGpu.o
 OBSPHGPU=JArraysGpu.o JDebugSphGpu.o JCellDivGpu.o JSphGpu.o 
 OBSPHSINGLEGPU=JCellDivGpuSingle.o JSphGpuSingle.o
 OBCUDA=JCellDivGpu_ker.o JCellDivGpuSingle_ker.o JDsPips_ker.o JDsGauge_ker.o JReduSum_ker.o JSphShifting_ker.o JDsAccInput_ker.o JSphGpu_ker.o JSphGpuSimple_ker.o JWaveOrder2_ker.o
-#OBCUDA=JCellDivGpu_ker.o JCellDivGpuSingle_ker.o JDsPips_ker.o JDsGauge_ker.o JReduSum_ker.o JSphShifting_ker.o JDsAccInput_ker.o JSphGpuSimple_ker.o JWaveOrder2_ker.o
 
 OBWAVERZ=JMLPistonsGpu.o JRelaxZonesGpu.o
 OBWAVERZCUDA=JRelaxZone_ker.o
@@ -161,9 +149,6 @@ endif
 ifeq ($(COMPILE_CHRONO), YES)
   JLIBS:=$(JLIBS) -ldsphchrono -lChronoEngine 
 endif
-ifeq ($(COMPILE_CHRONO_OMP), YES)
-  JLIBS:=$(JLIBS) -lChronoEngine_parallel
- endif
 ifeq ($(COMPILE_WAVEGEN), YES)
   JLIBS:=$(JLIBS) -ljwavegen_64
 endif
@@ -178,7 +163,7 @@ NCC=nvcc
 ifeq ($(USE_DEBUG), NO)
   NCCFLAGS+=-c $(GENCODE) -O3 -ccbin $(CC)
 else
-  NCCFLAGS+=-c $(GENCODE) -O0 -ccbin $(CC) -g -G
+  NCCFLAGS+=-c $(GENCODE) -O0 -ccbin $(CC) -g
 endif
 ifeq ($(USE_FAST_MATH), YES)
   NCCFLAGS+= -use_fast_math

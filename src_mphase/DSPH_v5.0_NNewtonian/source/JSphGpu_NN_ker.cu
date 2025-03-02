@@ -1340,7 +1340,7 @@ __global__ void KerInteractionForcesFluid_NN_SPH_ConsEq(unsigned n,unsigned pini
     const typecode pp1=CODE_GetTypeValue(cod);
     float visco_etap1=visco_eta[p1];
 
-    //-Variables for tau.			
+    //-Variables for tau. Change tauff to sigma
     float2 taup1_xx_xy=tauff[p1*3];
     float2 taup1_xz_yy=tauff[p1*3+1];
     float2 taup1_yz_zz=tauff[p1*3+2];
@@ -2253,6 +2253,12 @@ __global__ void KerInteractionForcesFluid_NN_SPH_PressGrad(unsigned n,unsigned p
         if(symm && rsymp1)	KerInteractionForcesFluidBox_NN_SPH_PressGrad<tker,ftmode,tvisco,tdensity,shift,true >(true,p1,pini,pfin,ftomassp,poscell,velrhop,code,idp,CTE.massb,pp1,ftp1,pscellp1,velrhop1,pressp1,grap1_xx_xy,grap1_xz_yy,grap1_yz_zz,acep1,arp1,visc,deltap1,shiftmode,shiftposfsp1); //<vs_syymmetry>
       }
     }
+    
+    //Calculate strain/spin rate tensor for granular phase NEED VELGRADIENT
+    //GetStrainSpinRateTensor_sym(gradvp1_xx_xy_xz,gradvp1_yx_yy_yz,gradvp1_zx_zy_zz,e_tensorp1_xx_xy,e_tensorp1_xz_yy,e_tensorp1_yz_zz,w_tensorp1_xy_yz_xz);
+    //Calculate stress rate tensor if p1=soil mdbr
+    //if(PHASECTE[pp1].phasetype==1)GetStressRateTensor_Elastic(e_tensorp1_xx_xy,e_tensorp1_xz_yy,e_tensorp1_yz_zz,w_tensorp1_xy_yz_xz,sigmap1_xx_xy,sigmap1_xz_yy,sigmap1_yz_zz,PHASECTE[pp1].ModulusK,PHASECTE[pp1].ModulusG,rsigmap1_xx_xy,rsigmap1_xz_yy,rsigmap1_yz_zz);
+    
     //-Stores results.
     if(shift||arp1||acep1.x||acep1.y||acep1.z||visc) {
       if(tdensity!=DDT_None) {
@@ -2264,6 +2270,14 @@ __global__ void KerInteractionForcesFluid_NN_SPH_PressGrad(unsigned n,unsigned p
       }
       ar[p1]+=arp1;
       float3 r=ace[p1]; r.x+=acep1.x; r.y+=acep1.y; r.z+=acep1.z; ace[p1]=r;
+      
+      //===mdbr
+      //float2 rs;
+      //rs=rsigma[p1*3];	    rs=make_float2(rs.x+rsigmap1_xx_xy.x,rs.y+rsigmap1_xx_xy.y); rsigma[p1*3]=rs;
+	  //rs=rsigma[p1*3+1];	rs=make_float2(rs.x+rsigmap1_xz_yy.x,rs.y+rsigmap1_xz_yy.y); rsigma[p1*3+1]=rs;
+	  //rs=rsigma[p1*3+2];	rs=make_float2(rs.x+rsigmap1_yz_zz.x,rs.y+rsigmap1_yz_zz.y); rsigma[p1*3+2]=rs;
+      //===
+
       if(visc>viscdt[p1])viscdt[p1]=visc;
       if(tvisco!=VISCO_Artificial) {
         float2 rg;

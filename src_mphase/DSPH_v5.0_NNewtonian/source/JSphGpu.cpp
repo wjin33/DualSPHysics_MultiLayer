@@ -814,6 +814,7 @@ void JSphGpu::ConfigBlockSizes(bool usezone,bool useperi){
         ,NULL
         ,NULL,NULL,NULL,NULL,NULL
         ,NULL,NULL,NULL,NULL,NULL,NULL,NULL
+        ,NULL,NULL
         ,NULL
         ,NULL,&kerinfo);
       if(!MultiPhase)cusph::Interaction_Forces(parms);

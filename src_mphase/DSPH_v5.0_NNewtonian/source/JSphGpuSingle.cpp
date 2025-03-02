@@ -500,6 +500,7 @@ void JSphGpuSingle::Interaction_Forces(TpInterStep interstep){
     ,FtoMasspg
     ,ViscDtg, ViscEtaDtg,Arg,Aceg,Deltag
     ,Visco_etag, SpsTaug, Pstraing, SpsGradvelg, D_tensorg, VolFracg, AuxNNg
+    ,Sigmag, Rsigmag
     ,ShiftPosfsg 
     ,NULL,NULL);
 

@@ -1546,13 +1546,13 @@ __global__ void KerComputeSpsTau(unsigned n,unsigned pini,float smag,float blin
 }
 
 __global__ void kerInitializeVolFracRhoTauPstrain(unsigned n,unsigned pini,const typecode *code
-  ,float2 *tauff,float2 *pstrain, float4 *velrhop, float *VolFrac,float3 *force,TpVisco tvisco)
+  ,float2 *tauff,float2 *pstrain, float4 *velrhop, float *VolFrac,TpVisco tvisco)
 {
   unsigned p=blockIdx.x*blockDim.x + threadIdx.x; 
   if(p<n){
     const unsigned p1=p+pini;
     const typecode pp1=CODE_GetTypeValue(code[p1]); //phase information
-    tauff[p1*3]=make_float2(0,0); //currently let the initial stress for all the particles been 0
+    tauff[p1*3]=make_float2(0,0); //currently let the initial stress for all the particles be 0
     tauff[p1*3+1]=make_float2(0,0);
     tauff[p1*3+2]=make_float2(0,0);
     pstrain[p1*3]=make_float2(0,0); //Set the initial plastic strain for all the particles to 0
@@ -1562,17 +1562,17 @@ __global__ void kerInitializeVolFracRhoTauPstrain(unsigned n,unsigned pini,const
                         // note if p1 is soil, VolFrac = 1 means 100% soil and if p1 is water, VolFrac = 1 means 100% water
     if(pp1 == 1)
     {// Don't need to worry about density of fluids, they are calculated from pressure in interaction_forces
-    velrhop[p1].w = PhaseDruckerPrager[pp1].DP_rho;//Need to Stores constants for the GPU interactio
+    velrhop[p1].w = PHASEDRUCKERPRAGER[pp1].DP_rho;//Need to Stores constants for the GPU interaction
     }
   }
 }
 
-void InitializeVolFracRhoTauPstrain(unsigned np,unsigned npb,const typecode *code, tsymatrix3f *tau, tsymatrix3f *Pstraing, float4 *Velrhopg,float *VolFracg, float3 *Forceg,TpVisco tvisco, cudaStream_t stm)
+void InitializeVolFracRhoTauPstrain(unsigned np,unsigned npb,const typecode *code, tsymatrix3f *tau, tsymatrix3f *Pstraing, float4 *Velrhopg,float *VolFracg, TpVisco tvisco, cudaStream_t stm)
 {
   const unsigned npf=np-npb;
   if(npf){
     dim3 sgridf=GetSimpleGridSize(npf,SPHBSIZE);
-    kerInitializeVolFracRhoTauPstrain <<<sgridf,SPHBSIZE,0,stm>>> (npf,npb,code,(float2*)tau,(tsymatrix3f*)pstrain,(float4*)Velrhopg,VolFracg,(float3*)Forceg,tvisco);
+    kerInitializeVolFracRhoTauPstrain <<<sgridf,SPHBSIZE,0,stm>>> (npf,npb,code,(float2*)tau,(float2*)Pstraing,(float4*)Velrhopg,VolFracg,tvisco);
   }
 }
 

@@ -951,7 +951,7 @@ void JSphGpuSingle::SaveData(){
   //-Stores particle data. | Graba datos de particulas.
   JDataArrays arrays;
   AddBasicArrays(arrays,npsave,AuxPos,Idp,AuxVel,AuxRhop);
-  if (Sigma) arrays.AddArray("Sigma",npsave,Sigma);
+  if (Sigma) arrays.AddArray("Sigma",npsave,AuxSigma_xx_yy_zz,AuxSigma_xy_yz_xz);
   if (VolFrac)  arrays.AddArray("VolFrac",npsave,VolFrac);
   JSph::SaveData(npsave,arrays,1,vdom,&infoplus);
   if(UseNormals && SvNormals)SaveVtkNormalsGpu("normals/Normals.vtk",Part,npsave,Npb,Posxyg,Poszg,Idpg,BoundNormalg);

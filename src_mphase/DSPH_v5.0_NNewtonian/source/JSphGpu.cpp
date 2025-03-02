@@ -320,7 +320,6 @@ void JSphGpu::AllocCpuMemoryParticles(unsigned np){
       AuxSigma_xy_yz_xz = new tfloat3[np]; MemCpuParticles+=sizeof(tfloat3)*np;
       //======
       VolFrac=new float[np];      MemCpuParticles+=sizeof(float)*np;
-      Sigma=new tfloat3[np];     MemCpuParticles+=sizeof(tfloat3)*np;
     }
     catch(const std::bad_alloc){
       Run_Exceptioon(fun::PrintStr("Could not allocate the requested memory (np=%u).",np));
@@ -557,7 +556,7 @@ void JSphGpu::ReserveBasicArraysGpu(){
   if(!MultiPhase && TVisco==VISCO_LaminarSPS)SpsTaug=ArraysGpu->ReserveSymatrix3f();  //<vs_non-Newtonian>
   if (TVisco == VISCO_SoilWater) {
       //SpsTaug = ArraysGpu->ReserveSymatrix3f();
-      Sigmag = ArraysGpu->ReserveFloat3(); //This is used for stress output
+      //Sigmag = ArraysGpu->ReserveSymatrix3f(); //This is used for stress output
       VolFracg = ArraysGpu->ReserveFloat();
       Pstraing = ArraysGpu->ReserveSymatrix3f();
       //Forceg = ArraysGpu->ReserveFloat3();

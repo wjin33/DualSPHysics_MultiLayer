@@ -280,7 +280,7 @@ template<bool floating,bool shift,bool inout> __global__ void KerComputeStepSymp
         rvelrhopnew.z=float(double(rvelrhoppre.z) + (double(race.z)+gravity.z) * dtm);
         //-Calculate elastic stress
         tsymatrix3f sigma_e = { 0,0,0,0,0,0 }; tsymatrix3f sigmanew = { 0,0,0,0,0,0 };
-        float kplasticold = kplasticpre[p];
+        //float kplasticold = kplasticpre[p];
         sigma_e.xx = float(double(sigmapre[p].xx) + rsigma[p].xx * dtm);
         sigma_e.yy = float(double(sigmapre[p].yy) + rsigma[p].yy * dtm);
         sigma_e.zz = float(double(sigmapre[p].zz) + rsigma[p].zz * dtm);
@@ -401,7 +401,7 @@ template<bool floating,bool shift,bool inout> __global__ void KerComputeStepSymp
         bool outrhop=(rvelrhopnew.w<rhopoutmin || rvelrhopnew.w>rhopoutmax);
                 //-Calculate elastic stress
         tsymatrix3f sigma_e = { 0,0,0,0,0,0 }; tsymatrix3f sigmanew = { 0,0,0,0,0,0 };
-        float kplasticold = kplasticpre[p]; float kplasticnew = 0;
+        //float kplasticold = kplasticpre[p]; float kplasticnew = 0;
         sigma_e.xx = float(double(sigmapre[p].xx) + rsigma[p].xx*dt);
         sigma_e.yy = float(double(sigmapre[p].yy) + rsigma[p].yy*dt);
         sigma_e.zz = float(double(sigmapre[p].zz) + rsigma[p].zz*dt);

@@ -507,17 +507,17 @@ __device__ void GetStrainSpinRateTensor_sym(float3 gradvp1_xx_xy_xz,float3 gradv
   ,float2 &e_tensor_xx_xy,float2 &e_tensor_xz_yy,float2 &e_tensor_yz_zz,float3 &w_tensor_xy_yz_xz)
 {
   //Build strain rate tensor
-  float e_tensor_xx_xy.x=gradvp1_xx_xy_xz.x;		
-  float e_tensor_xz_yy.y=gradvp1_yx_yy_yz.y;	  
-  float e_tensor_yz_zz.y=gradvp1_zx_zy_zz.z;
-  float e_tensor_xx_xy.y=0.5f*(gradvp1_xx_xy_xz.y+gradvp1_yx_yy_yz.x);
-  float e_tensor_yz_zz.x=0.5f*(gradvp1_yx_yy_yz.z+gradvp1_zx_zy_zz.y);
-  float e_tensor_xz_yy.x=0.5f*(gradvp1_xx_xy_xz.z+gradvp1_zx_zy_zz.x);
+  e_tensor_xx_xy.x=gradvp1_xx_xy_xz.x;		
+  e_tensor_xz_yy.y=gradvp1_yx_yy_yz.y;	  
+  e_tensor_yz_zz.y=gradvp1_zx_zy_zz.z;
+  e_tensor_xx_xy.y=0.5f*(gradvp1_xx_xy_xz.y+gradvp1_yx_yy_yz.x);
+  e_tensor_yz_zz.x=0.5f*(gradvp1_yx_yy_yz.z+gradvp1_zx_zy_zz.y);
+  e_tensor_xz_yy.x=0.5f*(gradvp1_xx_xy_xz.z+gradvp1_zx_zy_zz.x);
 
   //Build spin rate tensor
-  float w_tensor_xy_yz_xz.x = 0.5f*(gradvp1_xx_xy_xz.y-gradvp1_yx_yy_yz.x);
-  float w_tensor_xy_yz_xz.y = 0.5f*(gradvp1_yx_yy_yz.z-gradvp1_zx_zy_zz.y);
-  float w_tensor_xy_yz_xz.z = 0.5f*(gradvp1_xx_xy_xz.z-gradvp1_zx_zy_zz.x);
+  w_tensor_xy_yz_xz.x = 0.5f*(gradvp1_xx_xy_xz.y-gradvp1_yx_yy_yz.x);
+  w_tensor_xy_yz_xz.y = 0.5f*(gradvp1_yx_yy_yz.z-gradvp1_zx_zy_zz.y);
+  w_tensor_xy_yz_xz.z = 0.5f*(gradvp1_xx_xy_xz.z-gradvp1_zx_zy_zz.x);
 }
 
 //==============================================================================

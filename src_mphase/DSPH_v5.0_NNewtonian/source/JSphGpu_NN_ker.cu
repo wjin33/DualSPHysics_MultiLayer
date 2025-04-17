@@ -1086,9 +1086,9 @@ __global__ void KerInteractionForcesFluid_NN_FDA(unsigned n,unsigned pinit,float
       if(visceta>viscetadt[p1])viscetadt[p1]=visceta;
       if(tvisco==VISCO_LaminarSPS) {
         float3 rg;
-        rg=gradvelff[p1*3];		 rg=make_float3(rg.x+grap1_xx_xy_xz.x,rg.y+grap1_xx_xy_xz.y,rg.z+gradp1_xx_xy_xz.z);  gradvelff[p1*3]=rg;
-        rg=gradvelff[p1*3+1];  rg=make_float3(rg.x+grap1_yx_yy_yz.x,rg.y+grap1_yx_yy_yz.y,rg.z+gradp1_yx_yy_yz.z);  gradvelff[p1*3+1]=rg;
-        rg=gradvelff[p1*3+2];  rg=make_float3(rg.x+grap1_zx_zy_zz.x,rg.y+grap1_zx_zy_zz.y,rg.z+gradp1_zx_zy_zz.z);  gradvelff[p1*3+2]=rg;
+        rg=gradvelff[p1*3];		 rg=make_float3(rg.x+grap1_xx_xy.x,rg.y+grap1_xx_xy.y,rg.z+grap1_xz_yy.x);  gradvelff[p1*3]=rg;
+        rg=gradvelff[p1*3+1];  rg=make_float3(rg.x+grap1_xx_xy.y,rg.y+grap1_xz_yy.y,rg.z+grap1_yz_zz.x);  gradvelff[p1*3+1]=rg;
+        rg=gradvelff[p1*3+2];  rg=make_float3(rg.x+grap1_xz_yy.x,rg.y+grap1_yz_zz.x,rg.z+grap1_yz_zz.y);  gradvelff[p1*3+2]=rg;
       }
       if(shift)shiftposfs[p1]=shiftposfsp1;
       //auxnn[p1] = visco_etap1; //to be used if an auxilary is needed for debug or otherwise.
@@ -1868,7 +1868,7 @@ __device__ void KerInteractionForcesMultilayerGranularBox_NN_SPH_PressGrad(bool 
       , const float4& pscellp1, const float4& velrhop1, float& pressp1
       , float3& grap1_xx_xy_xz, float3& grap1_yx_yy_yz, float3& grap1_zx_zy_zz
       , float3& acep1, float& arp1, float& visc, float& deltap1
-      , TpShifting shiftmode, float4& shiftposfsp1, float prep1, float& volfracp1, float* volfrac)
+      , TpShifting shiftmode, float4& shiftposfsp1, float prep1,const float& volfracp1, float* volfrac)
   {
       for (int p2 = pini; p2 < pfin; p2++) {
           const float4 pscellp2 = poscell[p2];
@@ -1921,7 +1921,7 @@ __device__ void KerInteractionForcesMultilayerGranularBox_NN_SPH_PressGrad(bool 
                    const float prs = volfracp1 * (pressp2 - prep1) / (volfracp2 * velrhop2.w * velrhop1.w) + (tker == KERNEL_Cubic ? cufsph::GetKernelCubic_Tensil(rr2, velrhop1.w, pressp1, velrhop2.w, pressp2) : 0);
                    const float p_vpm = -prs * (USE_FLOATING ? ftmassp2 : massp2);
 
-                   const float fd_x = 0.0f, fd_y = 0.0f, fd_z = 0.0f;
+                   float fd_x = 0.0f, fd_y = 0.0f, fd_z = 0.0f;
                    const float Drag_alphad = PHASEDRUCKERPRAGER[pp1].Drag_alphad;
                    const float visco = PHASECTE[pp2].visco;
                    const float DP_Dc = PHASEDRUCKERPRAGER[pp1].DP_Dc;
@@ -1942,7 +1942,7 @@ __device__ void KerInteractionForcesMultilayerGranularBox_NN_SPH_PressGrad(bool 
                 }
               }
               
-              const float cbar = 0.0f;
+              float cbar = 0.0f;
               if (tvisco != VISCO_SoilWater || pp2 == 0) cbar = max(PHASEARRAY[pp1].Cs0, PHASEARRAY[pp2].Cs0);
               else if (pp2 == 1) cbar = PHASEDRUCKERPRAGER[pp1].DP_Cs0;
               const float dot3 = (tdensity != DDT_None || shift ? drx * frx + dry * fry + drz * frz : 0);
@@ -1982,8 +1982,7 @@ __device__ void KerInteractionForcesMultilayerGranularBox_NN_SPH_PressGrad(bool 
                   if((dot<0) && (pp2==1) && tvisco == VISCO_SoilWater) {
                       const float amubar=CTE.kernelh*dot_rr2;  //amubar=CTE.h*dot/(rr2+CTE.eta2);
                       const float robar=(velrhop1.w+velrhop2.w)*0.5f;
-                      const float visco_NN = 0.0f;
-                      visco_NN = PHASEDRUCKERPRAGER[pp2].DP_Cs0;
+                      const float visco_NN = PHASEDRUCKERPRAGER[pp2].DP_Cs0;
                       const float pi_visc=(visco_NN*cbar*amubar/robar)*massp2;
                       acep1.x +=pi_visc*frx; acep1.y +=pi_visc*fry; acep1.z +=pi_visc*frz;
                   }
@@ -2231,8 +2230,8 @@ __global__ void KerInteractionForcesFluid_NN_SPH_PressGrad(unsigned n,unsigned p
       unsigned pini,pfin=0; cunsearch::ParticleRange(c2,c3,ini1,fin1,begincell,pini,pfin);
       if(pfin) {
           if (tvisco != VISCO_SoilWater){
-              KerInteractionForcesFluidBox_NN_SPH_PressGrad<tker, ftmode, tvisco, tdensity, shift, false>(false, p1, pini, pfin, ftomassp, poscell, velrhop, code, idp, CTE.massf, pp1, ftp1, pscellp1, velrhop1, pressp1, grap1_xx_xy_xz, grap1_yx_yy_yz, grap1_zx_yz_zz, acep1, arp1, visc, deltap1, shiftmode, shiftposfsp1);
-              if (symm && rsymp1)	KerInteractionForcesFluidBox_NN_SPH_PressGrad<tker, ftmode, tvisco, tdensity, shift, true >(false, p1, pini, pfin, ftomassp, poscell, velrhop, code, idp, CTE.massf, pp1, ftp1, pscellp1, velrhop1, pressp1, grap1_xx_xy_xz, grap1_yx_yy_yz, grap1_zx_yz_zz, acep1, arp1, visc, deltap1, shiftmode, shiftposfsp1); //<vs_syymmetry>
+              KerInteractionForcesFluidBox_NN_SPH_PressGrad<tker, ftmode, tvisco, tdensity, shift, false>(false, p1, pini, pfin, ftomassp, poscell, velrhop, code, idp, CTE.massf, pp1, ftp1, pscellp1, velrhop1, pressp1, grap1_xx_xy_xz, grap1_yx_yy_yz, grap1_zx_zy_zz, acep1, arp1, visc, deltap1, shiftmode, shiftposfsp1);
+              if (symm && rsymp1)	KerInteractionForcesFluidBox_NN_SPH_PressGrad<tker, ftmode, tvisco, tdensity, shift, true >(false, p1, pini, pfin, ftomassp, poscell, velrhop, code, idp, CTE.massf, pp1, ftp1, pscellp1, velrhop1, pressp1, grap1_xx_xy_xz, grap1_yx_yy_yz, grap1_zx_zy_zz, acep1, arp1, visc, deltap1, shiftmode, shiftposfsp1); //<vs_syymmetry>
           }
           if (tvisco == VISCO_SoilWater && pp1 == 0) {         //-If p1 is fluid
               //usp1 = make_float3(0,0,0);
@@ -2243,9 +2242,9 @@ __global__ void KerInteractionForcesFluid_NN_SPH_PressGrad(unsigned n,unsigned p
           }
           if (tvisco == VISCO_SoilWater && pp1 == 1) {         //-If p1 is granular 
               prep1 = 0;
-              KerInterpolationPFluidToGranular<tker, tvisco, false>(pini, pfin, poscell, velrhop, code, pscellp1, pressp1, prep1, volfrac);
-              if (symm && rsymp1) KerInterpolationPFluidToGranular<tker, tvisco, true>(pini, pfin, poscell, velrhop, code, pscellp1, pressp1, prep1, volfrac);
-              KerInteractionForcesMultilayerGranularBox_NN_SPH_PressGrad<tker, ftmode, tvisco, tdensity, shift, false>(false, p1, pini, pfin, ftomassp, poscell, velrhop, code, idp, CTE.massf, pp1, ftp1, pscellp1, velrhop1, pressp1, grap1_xx_xy_xz, grap1_yx_yy_yz, grap1_zx_yz_zz, acep1, arp1, visc, deltap1, shiftmode, shiftposfsp1, prep1, volfracp1, volfrac);
+              KerInterpolationPFluidToGranular<tker, tvisco, false>(pini, pfin, poscell, velrhop, code, pscellp1, prep1, volfrac);
+              if (symm && rsymp1) KerInterpolationPFluidToGranular<tker, tvisco, true>(pini, pfin, poscell, velrhop, code, pscellp1, prep1, volfrac);
+              KerInteractionForcesMultilayerGranularBox_NN_SPH_PressGrad<tker, ftmode, tvisco, tdensity, shift, false>(false, p1, pini, pfin, ftomassp, poscell, velrhop, code, idp, CTE.massf, pp1, ftp1, pscellp1, velrhop1, pressp1, grap1_xx_xy_xz, grap1_yx_yy_yz, grap1_zx_zy_zz, acep1, arp1, visc, deltap1, shiftmode, shiftposfsp1, prep1, volfracp1, volfrac);
               //if (symm && rsymp1)	KerInteractionForcesMultilayerGranularBox_NN_SPH_PressGrad<tker, ftmode, tvisco, tdensity, shift, true >(false, p1, pini, pfin, ftomassp, poscell, velrhop, code, idp, CTE.massf, pp1, ftp1, pscellp1, velrhop1, pressp1, grap1_xx_xy_xz, grap1_yx_yy_yz, grap1_zx_yz_zz, acep1, arp1, visc, deltap1, shiftmode, shiftposfsp1, prep1, volfracp1, volfrac); //<vs_syymmetry>
           }
     }
@@ -2254,8 +2253,8 @@ __global__ void KerInteractionForcesFluid_NN_SPH_PressGrad(unsigned n,unsigned p
     for(int c3=ini3; c3<fin3; c3+=nc.w)for(int c2=ini2; c2<fin2; c2+=nc.x) {
       unsigned pini,pfin=0; cunsearch::ParticleRange(c2,c3,ini1,fin1,begincell,pini,pfin);
       if(pfin) {
-        KerInteractionForcesFluidBox_NN_SPH_PressGrad<tker,ftmode,tvisco,tdensity,shift,false>(true,p1,pini,pfin,ftomassp,poscell,velrhop,code,idp,CTE.massb,pp1,ftp1,pscellp1,velrhop1,pressp1,grap1_xx_xy_xz, grap1_yx_yy_yz, grap1_zx_yz_zz,acep1,arp1,visc,deltap1,shiftmode,shiftposfsp1);
-        if(symm && rsymp1)	KerInteractionForcesFluidBox_NN_SPH_PressGrad<tker,ftmode,tvisco,tdensity,shift,true >(true,p1,pini,pfin,ftomassp,poscell,velrhop,code,idp,CTE.massb,pp1,ftp1,pscellp1,velrhop1,pressp1,grap1_xx_xy_xz, grap1_yx_yy_yz, grap1_zx_yz_zz,acep1,arp1,visc,deltap1,shiftmode,shiftposfsp1); //<vs_syymmetry>
+        KerInteractionForcesFluidBox_NN_SPH_PressGrad<tker,ftmode,tvisco,tdensity,shift,false>(true,p1,pini,pfin,ftomassp,poscell,velrhop,code,idp,CTE.massb,pp1,ftp1,pscellp1,velrhop1,pressp1,grap1_xx_xy_xz, grap1_yx_yy_yz, grap1_zx_zy_zz,acep1,arp1,visc,deltap1,shiftmode,shiftposfsp1);
+        if(symm && rsymp1)	KerInteractionForcesFluidBox_NN_SPH_PressGrad<tker,ftmode,tvisco,tdensity,shift,true >(true,p1,pini,pfin,ftomassp,poscell,velrhop,code,idp,CTE.massb,pp1,ftp1,pscellp1,velrhop1,pressp1,grap1_xx_xy_xz, grap1_yx_yy_yz, grap1_zx_zy_zz,acep1,arp1,visc,deltap1,shiftmode,shiftposfsp1); //<vs_syymmetry>
       }
     }
     

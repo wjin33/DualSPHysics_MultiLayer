@@ -545,7 +545,7 @@ void JSphGpuSingle::MdbcBoundCorrection(){
 //    ,Idpg,BoundNormalg,MotionVelg,Velrhopg);
   cusphNN::Interaction_MdbcCorrectionNN(TKernel, Simulate2D, SlipMode, MdbcFastSingle
 	  , n, CaseNbound, MdbcThreshold, DivData, Map_PosMin, Posxyg, Poszg, PosCellg, Codeg
-	  , Idpg, BoundNormalg, MotionVelg, Velrhopg,SpsTaug);//DEBUG need to confirm the stress tensor
+	  , Idpg, BoundNormalg, MotionVelg, Velrhopg,Sigmag);//DEBUG need to confirm the stress tensor
   TmgStop(Timers,TMG_CfPreForces);
 }
 

@@ -26,6 +26,9 @@
 //#include "JDgKerPrint_ker.h"
 #include <cfloat>
 
+#define MAXNUMBERPHASE 10
+
+__constant__ StPhaseDruckerPrager PHASEDRUCKERPRAGER[MAXNUMBERPHASE];
 
 namespace cusphs{
 #include "FunctionsBasic_iker.h"
@@ -114,6 +117,166 @@ void Resety(unsigned n,unsigned ini,float3 *v,cudaStream_t stm){
   }
 }
 
+//========Implement Soil Constitutive Model=========
+
+
+//==========Include DP without softening for testing===
+//==============================================================================
+__device__ void GetStressInvariant(float sigmaxx, float sigmayy, float sigmazz, float sigmaxy, float sigmayz, float sigmaxz,float &I1,float &J2)
+{
+  I1= sigmaxx + sigmayy + sigmazz;
+  J2=((sigmaxx-sigmazz)*(sigmaxx-sigmazz)+(sigmayy-sigmazz)*(sigmayy-sigmazz)+(sigmayy-sigmaxx)*(sigmayy-sigmaxx))/6.+sigmaxy*sigmaxy+sigmayz*sigmayz+sigmaxz*sigmaxz;
+}
+
+__device__ void GetDPYieldFunction(float &f, float I1, float J2, const float DP_phi, const float DP_kc)
+{
+   f=sqrt(J2)+DP_phi*I1-DP_kc;
+}
+__device__ void ConsRelationEP(tsymatrix3f sigma, tsymatrix3f& nsigma
+		, const float E_ModulusK, const float E_ModulusG, const float MC_phi, const float MC_c, const float MC_psi)
+{//elastic predictor-plastic corrector
+    double tsigma_xx, tsigma_yy, tsigma_zz, tsigma_xy, tsigma_yz, tsigma_xz, tk;// trial value
+	unsigned iter;//number of iterations
+
+	float ModulusK = E_ModulusK;
+	float ModulusG = E_ModulusG;
+	const float phi = MC_phi;
+	const float coh = MC_c;
+	const float psi = MC_psi;
+	//Build Elastic stiffness matrix
+	float K4G3 = float(ModulusK + 4.*ModulusG/3.);
+	float K2G3 = float(ModulusK- 2.*ModulusG/3.);
+	//Build Inversed elastic stiffness matrix
+	float invK4G3 = (K2G3 + K4G3) / (-2 * K2G3*K2G3 + K2G3*K4G3 + K4G3*K4G3);
+	float invK2G3 = -K2G3 / (-2 * K2G3*K2G3 + K2G3*K4G3 + K4G3*K4G3);
+	float invm_a11 = invK4G3; float invm_a12 = invK2G3; float invm_a13 = invK2G3;
+	float invm_a21 = invK2G3; float invm_a22 = invK4G3; float invm_a23 = invK2G3;
+	float invm_a31 = invK2G3; float invm_a32 = invK2G3; float invm_a33 = invK4G3;
+	//trail stress from elastic update
+    tsigma_xx = sigma.xx;
+    tsigma_yy = sigma.yy;
+    tsigma_zz = sigma.zz;
+    tsigma_xy = sigma.xy;
+    tsigma_yz = sigma.yz;
+    tsigma_xz = sigma.xz;
+	iter = 0;
+	//evaluate yeild condition
+	///Plain strain
+	//float DP_phi = tan(phi)/sqrt(9.+12.*tan(phi)*tan(phi)); // Make it as a function
+    //float DP_kc = 3.*coh/sqrt(9.+12.*tan(phi)*tan(phi)); 
+    //float DP_psi = tan(psi)/sqrt(9.+12.*tan(psi)*tan(psi)); //
+	///Highest set
+	float DP_phi = 2.f*sin(phi)/((3.f-sin(phi))* 1.732f);
+	float DP_kc = 6.*coh*cos(phi)/((3.f-sin(phi))* 1.732f);
+	float DP_psi = 2.f*sin(psi)/((3.f-sin(psi))* 1.732f);
+	///Medium set
+	//float DP_phi = 2.f*sin(phi)/((3.f+sin(phi))* 1.732f);
+	//float DP_kc = 6.*coh*cos(phi)/((3.f+sin(phi))* 1.732f);
+	//float DP_psi = 2.f*sin(psi)/((3.f+sin(psi))* 1.732f);
+	///Lowest set
+	//float DP_phi = sin(phi)/sqrt(9.f+3.f*sin(phi)*sin(phi));
+	//float DP_kc = 3.*coh*cos(phi)/sqrt(9.f+3.f*sin(phi)*sin(phi));
+	//float DP_psi = sin(psi)/sqrt(9.f+3.f*sin(psi)*sin(psi));
+	float f=0, I1=0, J2=0;
+	GetStressInvariant(tsigma_xx,tsigma_yy,tsigma_zz,tsigma_xy,tsigma_yz,tsigma_xz,I1,J2);
+	GetDPYieldFunction(f,I1,J2,DP_phi,DP_kc);
+	if (f<0) {//elastic 
+		//Update plastic strain internal variable & stress
+		nsigma.xx = tsigma_xx;
+		nsigma.yy = tsigma_yy;
+		nsigma.zz = tsigma_zz;
+		nsigma.xy = tsigma_xy;
+		nsigma.yz = tsigma_yz;
+		nsigma.xz = tsigma_xz;
+	}	
+	else {//plastic corrector
+		float err = 1e-5;
+		double dsigmap_xx = 0, dsigmap_yy = 0, dsigmap_zz = 0, dsigmap_xy = 0, dsigmap_yz = 0, dsigmap_xz = 0
+			 , depsp_xx = 0, depsp_yy = 0, depsp_zz = 0, depsp_xy = 0, depsp_yz = 0, depsp_xz = 0, dk = 0;
+		while (f > err) {
+			//MODIFY PLASTIC MULTIPLFY
+			double dlambda = f /(9.*ModulusK*DP_phi*DP_psi+ModulusG);
+			float GJ2=ModulusG/sqrt(J2);
+			//evaluate De : plastic potential
+            double Deppxx = 3.f*ModulusK*DP_psi+GJ2*(tsigma_xx-I1/3.f); 
+			double Deppyy = 3.f*ModulusK*DP_psi+GJ2*(tsigma_yy-I1/3.f);
+			double Deppzz = 3.f*ModulusK*DP_psi+GJ2*(tsigma_zz-I1/3.f);
+			double Deppxy = GJ2*tsigma_xy;
+			double Deppyz = GJ2*tsigma_yz;
+			double Deppxz = GJ2*tsigma_xz;
+			//Compute plastic stress increment
+			dsigmap_xx = dlambda*Deppxx;
+			dsigmap_yy = dlambda*Deppyy;
+			dsigmap_zz = dlambda*Deppzz;
+			dsigmap_xy = dlambda*Deppxy;
+			dsigmap_yz = dlambda*Deppyz;
+			dsigmap_xz = dlambda*Deppxz;
+			//Update new stress matrix
+			tsigma_xx = tsigma_xx - dsigmap_xx;
+			tsigma_yy = tsigma_yy - dsigmap_yy;
+			tsigma_zz = tsigma_zz - dsigmap_zz;
+			tsigma_xy = tsigma_xy - dsigmap_xy;
+			tsigma_yz = tsigma_yz - dsigmap_yz;
+			tsigma_xz = tsigma_xz - dsigmap_xz;
+			//Compute plastic strain increment
+			 depsp_xx = invm_a11*dsigmap_xx + invm_a12*dsigmap_yy + invm_a13*dsigmap_zz;
+			 depsp_yy = invm_a21*dsigmap_xx + invm_a22*dsigmap_yy + invm_a23*dsigmap_zz;
+			 depsp_zz = invm_a31*dsigmap_xx + invm_a32*dsigmap_yy + invm_a33*dsigmap_zz;
+			 depsp_xy = 0.5f/ModulusG*dsigmap_xy;
+			 depsp_yz = 0.5f/ModulusG*dsigmap_yz;
+			 depsp_xz = 0.5f/ModulusG*dsigmap_xz; 
+			//bulk plastic strain increment
+			float depsp_b = (depsp_xx + depsp_yy + depsp_zz) / 3.f;
+			//deviatoric trail plastic strain
+			float dtepsp_xx = depsp_xx - depsp_b;
+			float dtepsp_yy = depsp_yy - depsp_b;
+			float dtepsp_zz = depsp_zz - depsp_b;
+			float dtepsp_xy = depsp_xy;
+			float dtepsp_yz = depsp_yz;
+			float dtepsp_xz = depsp_xz;
+			//Update internal variable
+			dk = sqrt((2. / 3.)*(dtepsp_xx*dtepsp_xx + dtepsp_yy*dtepsp_yy + dtepsp_zz*dtepsp_zz + 2.*dtepsp_xy*dtepsp_xy+ 2.*dtepsp_yz*dtepsp_yz +2.*dtepsp_xz*dtepsp_xz));
+			tk = tk + dk;
+			//Update stress invariant
+			GetStressInvariant(tsigma_xx,tsigma_yy,tsigma_zz,tsigma_xy,tsigma_yz,tsigma_xz,I1,J2);
+			//Update yeild function
+			GetDPYieldFunction(f,I1,J2,DP_phi,DP_kc);
+			iter = iter + 1;
+			//double kc = 0, alphap = 0;
+			//DPVariable(tk, alphap, kc);
+			float kalpha = DP_kc / DP_phi;
+			
+			if (I1 > kalpha)// I1 > kalpha check tensile cracking & perform stress scaling
+			{
+				tsigma_xx = tsigma_xx - (I1 - kalpha) / 3.;
+				tsigma_yy = tsigma_yy - (I1 - kalpha) / 3.;
+				tsigma_zz = tsigma_zz - (I1 - kalpha) / 3.;
+				GetStressInvariant(tsigma_xx,tsigma_yy,tsigma_zz,tsigma_xy,tsigma_yz,tsigma_xz,I1,J2);
+
+				float fscale = (-DP_phi * I1 + DP_kc) / sqrt(J2);
+				if (fscale < 1.f)// stress scaling
+				{
+					tsigma_xx = fscale * (tsigma_xx-I1/3.f) + I1 / 3.;
+					tsigma_yy = fscale * (tsigma_yy-I1/3.f) + I1 / 3.;
+					tsigma_zz = fscale * (tsigma_zz-I1/3.f) + I1 / 3.;
+					tsigma_xy = fscale * tsigma_xy;
+					tsigma_yz = fscale * tsigma_yz;
+					tsigma_xz = fscale * tsigma_xz;
+				GetStressInvariant(tsigma_xx,tsigma_yy,tsigma_zz,tsigma_xy,tsigma_yz,tsigma_xz,I1,J2);
+				}
+				GetDPYieldFunction(f,I1,J2,DP_phi,DP_kc);
+			}
+			
+		}
+		//Update plastic strain internal variable & stress
+		nsigma.xx = float(tsigma_xx);
+		nsigma.yy = float(tsigma_yy);
+		nsigma.zz = float(tsigma_zz);
+		nsigma.xy = float(tsigma_xy);
+		nsigma.yz = float(tsigma_yz);
+		nsigma.xz = float(tsigma_xz);
+	}
+}
 
 //##############################################################################
 //# Kernels for ComputeStep (vel & rhop).
@@ -257,6 +420,7 @@ template<bool floating,bool shift,bool inout> __global__ void KerComputeStepSymp
     }
     else{ //-Particles: Floating & Fluid.
       const typecode rcode=code[p];
+      const typecode pp1=CODE_GetTypeValue(rcode);
       //-Updates density.
       const float4 rvelrhoppre=velrhoppre[p];
       float4 rvelrhopnew=rvelrhoppre;
@@ -288,7 +452,13 @@ template<bool floating,bool shift,bool inout> __global__ void KerComputeStepSymp
         sigma_e.yz = float(double(sigmapre[p].yz) + rsigma[p].yz * dtm);
         sigma_e.xz = float(double(sigmapre[p].xz) + rsigma[p].xz * dtm);
         //-Plastic corrector
-        sigmanew=sigma_e;
+        const float DP_K=PHASEDRUCKERPRAGER[pp1].DP_K; ///<  Elastic bulk modulus
+        const float DP_G=PHASEDRUCKERPRAGER[pp1].DP_G;    ///< Elastic shear modulus
+        const float MC_phi=PHASEDRUCKERPRAGER[pp1].MC_phi;    ///< Friction angle in MC model, to be converted to DP yield surface parameters DP_AlphaPhi and DP_kc
+        const float MC_c= PHASEDRUCKERPRAGER[pp1].MC_c;    ///< Cohesion in MC model, to be converted to DP yield surface parameters DP_AlphaPhi and DP_kc
+        const float MC_psi = PHASEDRUCKERPRAGER[pp1].MC_psi;    ///< Dilatancy angle in MC model, to be converted to DP non-associate flow rule parameter DP_psi
+        //sigmanew=sigma_e;
+        ConsRelationEP(sigma_e,sigmanew,DP_K,DP_G,MC_phi,MC_c,MC_psi);
         //-Update stress/equivelant plastic strain
         sigma[p]=sigmanew;
         //-Restore data of inout particles.
@@ -377,6 +547,7 @@ template<bool floating,bool shift,bool inout> __global__ void KerComputeStepSymp
     }
     else{ //-Particles: Floating & Fluid.
       const typecode rcode=code[p];
+      const typecode pp1=CODE_GetTypeValue(rcode);
       //-Updates density.
       const double epsilon_rdot=(-double(ar[p])/double(velrhop[p].w))*dt;
       const float4 rvelrhoppre=velrhoppre[p];
@@ -409,7 +580,13 @@ template<bool floating,bool shift,bool inout> __global__ void KerComputeStepSymp
         sigma_e.yz = float(double(sigmapre[p].yz) + rsigma[p].yz*dt);
         sigma_e.xz = float(double(sigmapre[p].xz) + rsigma[p].xz*dt);
         //-Plastic corrector
-        sigmanew=sigma_e;
+        const float DP_K=PHASEDRUCKERPRAGER[pp1].DP_K; ///<  Elastic bulk modulus
+        const float DP_G=PHASEDRUCKERPRAGER[pp1].DP_G;    ///< Elastic shear modulus
+        const float MC_phi=PHASEDRUCKERPRAGER[pp1].MC_phi;    ///< Friction angle in MC model, to be converted to DP yield surface parameters DP_AlphaPhi and DP_kc
+        const float MC_c= PHASEDRUCKERPRAGER[pp1].MC_c;    ///< Cohesion in MC model, to be converted to DP yield surface parameters DP_AlphaPhi and DP_kc
+        const float MC_psi = PHASEDRUCKERPRAGER[pp1].MC_psi;    ///< Dilatancy angle in MC model, to be converted to DP non-associate flow rule parameter DP_psi
+        //sigmanew=sigma_e;
+        ConsRelationEP(sigma_e,sigmanew,DP_K,DP_G,MC_phi,MC_c,MC_psi);
         //-Update stress/equivelant plastic strain
         sigma[p] = sigmanew;
         //-Restore data of inout particles.

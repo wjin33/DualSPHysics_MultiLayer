@@ -2174,7 +2174,8 @@ __global__ void KerInteractionForcesFluid_NN_SPH_PressGrad(unsigned n,unsigned p
   ,const float4 *poscell
   ,const float4 *velrhop,const typecode *code,const unsigned *idp
   ,float *viscdt,float *ar,float3 *ace,float *delta
-  ,TpShifting shiftmode,float4 *shiftposfs, float *volfrac)
+  ,TpShifting shiftmode,float4 *shiftposfs, float *volfrac
+  ,const float2*sigma, float2 *rsigma)
 {
   const unsigned p=blockIdx.x*blockDim.x+threadIdx.x; //-Number of particle.
   float3 usp1 = make_float3(0,0,0); // soil interpolation velocity at fluid particle
@@ -2184,6 +2185,15 @@ __global__ void KerInteractionForcesFluid_NN_SPH_PressGrad(unsigned n,unsigned p
     unsigned p1=p+pinit;      //-Number of particle.
     float visc=0,arp1=0,deltap1=0;
     float3 acep1=make_float3(0,0,0);
+    float2 rsigmap1_xx_xy=make_float2(0,0);
+    float2 rsigmap1_xz_yy=make_float2(0,0);
+    float2 rsigmap1_yz_zz=make_float2(0,0);
+
+    float2 e_tensorp1_xx_xy=make_float2(0,0);//strain rate tensor
+    float2 e_tensorp1_xz_yy=make_float2(0,0);
+    float2 e_tensorp1_yz_zz=make_float2(0,0);
+
+    float3 w_tensorp1_xy_yz_xz=make_float3(0,0,0);//spin rate tensor
 
     //-Variables for Shifting.
     float4 shiftposfsp1;
@@ -2211,7 +2221,10 @@ __global__ void KerInteractionForcesFluid_NN_SPH_PressGrad(unsigned n,unsigned p
     float pressp1 = 0.0f;
     if (pp1 == 0) pressp1=cufsph::ComputePressCte_NN(velrhop1.w,PHASEARRAY[pp1].rho,PHASEARRAY[pp1].CteB,PHASEARRAY[pp1].Gamma,PHASEARRAY[pp1].Cs0,cod);
     const bool rsymp1=(symm && CEL_GetPartY(__float_as_uint(pscellp1.w))==0); //<vs_syymmetry>
-
+    //-Obtains stress tensor == mdbr
+    float2 sigmap1_xx_xy=sigma[p1*3];
+    float2 sigmap1_xz_yy=sigma[p1*3+1];
+    float2 sigmap1_yz_zz=sigma[p1*3+2];
     //-Variables for vel gradients
     float3 grap1_xx_xy_xz,grap1_yx_yy_yz,grap1_zx_zy_zz;
     if(tvisco!=VISCO_Artificial) {
@@ -2259,9 +2272,11 @@ __global__ void KerInteractionForcesFluid_NN_SPH_PressGrad(unsigned n,unsigned p
     }
     
     //Calculate strain/spin rate tensor for granular phase NEED VELGRADIENT
-    //GetStrainSpinRateTensor_sym(gradvp1_xx_xy_xz,gradvp1_yx_yy_yz,gradvp1_zx_zy_zz,e_tensorp1_xx_xy,e_tensorp1_xz_yy,e_tensorp1_yz_zz,w_tensorp1_xy_yz_xz);
+    GetStrainSpinRateTensor_sym(grap1_xx_xy_xz,grap1_yx_yy_yz,grap1_zx_zy_zz,e_tensorp1_xx_xy,e_tensorp1_xz_yy,e_tensorp1_yz_zz,w_tensorp1_xy_yz_xz);
     //Calculate stress rate tensor if p1=soil mdbr
-    //if(PHASECTE[pp1].phasetype==1)GetStressRateTensor_Elastic(e_tensorp1_xx_xy,e_tensorp1_xz_yy,e_tensorp1_yz_zz,w_tensorp1_xy_yz_xz,sigmap1_xx_xy,sigmap1_xz_yy,sigmap1_yz_zz,PHASECTE[pp1].ModulusK,PHASECTE[pp1].ModulusG,rsigmap1_xx_xy,rsigmap1_xz_yy,rsigmap1_yz_zz);
+    const float DP_K = PHASEDRUCKERPRAGER[pp1].DP_K; ///<  Elastic bulk modulus
+    const float DP_G = PHASEDRUCKERPRAGER[pp1].DP_G;    ///< Elastic shear modulus
+    if(pp1==1)GetStressRateTensor_Elastic(e_tensorp1_xx_xy,e_tensorp1_xz_yy,e_tensorp1_yz_zz,w_tensorp1_xy_yz_xz,sigmap1_xx_xy,sigmap1_xz_yy,sigmap1_yz_zz,DP_K,DP_G,rsigmap1_xx_xy,rsigmap1_xz_yy,rsigmap1_yz_zz);
     
     //-Stores results.
     if(shift||arp1||acep1.x||acep1.y||acep1.z||visc) {
@@ -2276,10 +2291,10 @@ __global__ void KerInteractionForcesFluid_NN_SPH_PressGrad(unsigned n,unsigned p
       float3 r=ace[p1]; r.x+=acep1.x; r.y+=acep1.y; r.z+=acep1.z; ace[p1]=r;
       
       //===mdbr
-      //float2 rs;
-      //rs=rsigma[p1*3];	    rs=make_float2(rs.x+rsigmap1_xx_xy.x,rs.y+rsigmap1_xx_xy.y); rsigma[p1*3]=rs;
-	  //rs=rsigma[p1*3+1];	rs=make_float2(rs.x+rsigmap1_xz_yy.x,rs.y+rsigmap1_xz_yy.y); rsigma[p1*3+1]=rs;
-	  //rs=rsigma[p1*3+2];	rs=make_float2(rs.x+rsigmap1_yz_zz.x,rs.y+rsigmap1_yz_zz.y); rsigma[p1*3+2]=rs;
+      float2 rs;
+      rs=rsigma[p1*3];	    rs=make_float2(rs.x+rsigmap1_xx_xy.x,rs.y+rsigmap1_xx_xy.y); rsigma[p1*3]=rs;
+	  rs=rsigma[p1*3+1];	rs=make_float2(rs.x+rsigmap1_xz_yy.x,rs.y+rsigmap1_xz_yy.y); rsigma[p1*3+1]=rs;
+	  rs=rsigma[p1*3+2];	rs=make_float2(rs.x+rsigmap1_yz_zz.x,rs.y+rsigmap1_yz_zz.y); rsigma[p1*3+2]=rs;
       //===
 
       if(visc>viscdt[p1])viscdt[p1]=visc;
@@ -2320,7 +2335,7 @@ void Interaction_ForcesGpuT_NN_SPH(const StInterParmsg &t)
       KerInteractionForcesFluid_NN_SPH_PressGrad<tker,ftmode,tvisco,tdensity,shift,true ><<<sgridf,t.bsfluid,0,t.stm>>>
         (t.fluidnum,t.fluidini,dvd.scelldiv,dvd.nc,dvd.cellzero,dvd.beginendcell,dvd.cellfluid,t.dcell
           ,t.ftomassp,(float3*)t.gradvel,t.poscell,t.velrhop,t.code,t.idp
-          ,t.viscdt,t.ar,t.ace,t.delta,t.shiftmode,t.shiftposfs,t.volfrac);
+          ,t.viscdt,t.ar,t.ace,t.delta,t.shiftmode,t.shiftposfs,t.volfrac,(float2*)t.sigma,(float2*)t.rsigma);
 
       if(tvisco !=VISCO_SoilWater)KerInteractionForcesFluid_NN_SPH_Visco_eta<ftmode,tvisco,true ><<<sgridf,t.bsfluid,0,t.stm>>>
         (t.fluidnum,t.fluidini,t.viscob,t.visco_eta,t.velrhop,dvd.scelldiv,dvd.nc,dvd.cellzero,dvd.beginendcell,dvd.cellfluid,t.dcell
@@ -2348,7 +2363,7 @@ void Interaction_ForcesGpuT_NN_SPH(const StInterParmsg &t)
       KerInteractionForcesFluid_NN_SPH_PressGrad<tker,ftmode,tvisco,tdensity,shift,false ><<<sgridf,t.bsfluid,0,t.stm>>>
         (t.fluidnum,t.fluidini,dvd.scelldiv,dvd.nc,dvd.cellzero,dvd.beginendcell,dvd.cellfluid,t.dcell
           ,t.ftomassp,(float3*)t.gradvel,t.poscell,t.velrhop,t.code,t.idp
-          ,t.viscdt,t.ar,t.ace,t.delta,t.shiftmode,t.shiftposfs,t.volfrac);
+          ,t.viscdt,t.ar,t.ace,t.delta,t.shiftmode,t.shiftposfs,t.volfrac,(float2*)t.sigma,(float2*)t.rsigma);
 
       if(tvisco !=VISCO_SoilWater)KerInteractionForcesFluid_NN_SPH_Visco_eta<ftmode,tvisco,false ><<<sgridf,t.bsfluid,0,t.stm>>>
         (t.fluidnum,t.fluidini,t.viscob,t.visco_eta,t.velrhop,dvd.scelldiv,dvd.nc,dvd.cellzero,dvd.beginendcell,dvd.cellfluid,t.dcell
@@ -2367,7 +2382,7 @@ void Interaction_ForcesGpuT_NN_SPH(const StInterParmsg &t)
         //Get stresses
         KerInteractionForcesFluid_NN_SPH_ConsEq<tker,ftmode,tvisco,false ><<<sgridf,t.bsfluid,0,t.stm>>>
           (t.fluidnum,t.fluidini,t.viscob,t.viscof,t.visco_eta,dvd.scelldiv,dvd.nc,dvd.cellzero,dvd.beginendcell,dvd.cellfluid,t.dcell
-            ,t.ftomassp,(float2*)t.tau,t.auxnn,t.poscell,t.velrhop,t.code,t.idp
+            ,t.ftomassp,(float2*)t.sigma,t.auxnn,t.poscell,t.velrhop,t.code,t.idp
             ,t.ace);
       }
     }

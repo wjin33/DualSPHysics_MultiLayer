@@ -841,7 +841,7 @@ void JSphGpuSingle::Run(std::string appname,JSphCfgRun *cfg,JLog2 *log){
 
   //-Load parameters and values of input. | Carga de parametros y datos de entrada.
   //--------------------------------------------------------------------------------
-  LoadConfig(cfg);
+  LoadConfig(cfg); // Load configurations related to the xml file
   LoadCaseParticles();
   VisuConfig();
   ConfigDomain();

@@ -198,7 +198,7 @@ __device__ void ConsRelationEP(tsymatrix3f sigma, tsymatrix3f& nsigma
 			double dlambda = f /(9.*ModulusK*DP_phi*DP_psi+ModulusG);
 			float GJ2=ModulusG/sqrt(J2);
 			//evaluate De : plastic potential
-            double Deppxx = 3.f*ModulusK*DP_psi+GJ2*(tsigma_xx-I1/3.f); 
+      double Deppxx = 3.f*ModulusK*DP_psi+GJ2*(tsigma_xx-I1/3.f); 
 			double Deppyy = 3.f*ModulusK*DP_psi+GJ2*(tsigma_yy-I1/3.f);
 			double Deppzz = 3.f*ModulusK*DP_psi+GJ2*(tsigma_zz-I1/3.f);
 			double Deppxy = GJ2*tsigma_xy;

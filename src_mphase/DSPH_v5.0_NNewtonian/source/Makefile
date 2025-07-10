@@ -2,7 +2,7 @@
 
 #=============== Compilation Options (YES/NO) ===============
 USE_GCC5=YES
-USE_DEBUG=NO
+USE_DEBUG=YES
 USE_FAST_MATH=YES
 USE_NATIVE_CPU_OPTIMIZATIONS=NO
 COMPILE_VTKLIB=YES
@@ -14,12 +14,13 @@ COMPILE_MOORDYN=NO
 LIBS_DIRECTORIES=-L./
 LIBS_DIRECTORIES:=$(LIBS_DIRECTORIES) -L../lib/linux_gcc
 
-EXECNAME=DualSPHysics5.0_NNewtonian_linux64
+EXECNAME=DualSPHysics5.0_Multiphase0529_linux64
 EXECS_DIRECTORY=../../../bin/linux
 
 # -std=c++0x ---> Used to avoid errors for calls to enums
 ifeq ($(USE_DEBUG), YES)
-  CCFLAGS=-c -O0 -g -Wall -fopenmp -D_WITHGPU -std=c++0x
+  #CCFLAGS=-c -O0 -g -Wall -fopenmp -D_WITHGPU -std=c++0x
+  CCFLAGS=-c -O0 -g -w -fopenmp -D_WITHGPU -std=c++0x
 else
   CCFLAGS=-c -O3 -fopenmp -D_WITHGPU -std=c++0x
   ifeq ($(USE_FAST_MATH), YES)
@@ -29,7 +30,7 @@ else
     CCFLAGS+= -march=native
   endif
 endif
-CC=g++
+CC=g++-9
 CCLINKFLAGS=-fopenmp -lgomp
 
 #Required for GCC versions >=5.0
@@ -56,7 +57,7 @@ ifeq ($(COMPILE_MOORDYN), NO)
 endif
 
 #=============== CUDA selection ===============
-CUDAVER=122
+CUDAVER=128
 
 #=============== CUDA toolkit directory (make appropriate for local CUDA installation) ===============
 ifeq ($(CUDAVER),00)
@@ -71,8 +72,11 @@ endif
 ifeq ($(CUDAVER),92)
   DIRTOOLKIT=/exports/opt/NVIDIA/cuda-9.2
 endif
-ifeq ($(CUDAVER),122)
-  DIRTOOLKIT=/exports/opt/NVIDIA/cuda-12.2
+ifeq ($(CUDAVER),115)
+  DIRTOOLKIT=/usr/local/cuda-11.5	
+endif
+ifeq ($(CUDAVER),128)
+  DIRTOOLKIT=/usr/local/cuda-12.8
 endif
 #=============== Select GPU architectures ===============
 ifeq ($(CUDAVER),00)
@@ -104,7 +108,11 @@ ifeq ($(CUDAVER),92)
   GENCODE:=$(GENCODE) -gencode=arch=compute_61,code=\"sm_61,compute_61\"
   GENCODE:=$(GENCODE) -gencode=arch=compute_70,code=\"sm_70,compute_70\"
 endif
-ifeq ($(CUDAVER),122)
+ifeq ($(CUDAVER),115)
+  GENCODE:=$(GENCODE) -gencode=arch=compute_75,code=\"sm_75,compute_75\"
+  GENCODE:=$(GENCODE) -gencode=arch=compute_86,code=\"sm_86,compute_86\"
+endif
+ifeq ($(CUDAVER),128)
   GENCODE:=$(GENCODE) -gencode=arch=compute_70,code=\"sm_70,compute_70\"
   GENCODE:=$(GENCODE) -gencode=arch=compute_75,code=\"sm_75,compute_75\"
   GENCODE:=$(GENCODE) -gencode=arch=compute_80,code=\"sm_80,compute_80\"
@@ -159,7 +167,8 @@ endif
 #=============== GPU Code Compilation ===============
 CCFLAGS := $(CCFLAGS) -I./ -I$(DIRTOOLKIT)/include
 CCLINKFLAGS := $(CCLINKFLAGS) -L$(DIRTOOLKIT)/lib64 -lcudart_static -ldl -lrt
-NCC=nvcc
+#NCC=nvcc
+NCC=$(DIRTOOLKIT)/bin/nvcc
 ifeq ($(USE_DEBUG), NO)
   NCCFLAGS+=-c $(GENCODE) -O3 -ccbin $(CC)
 else

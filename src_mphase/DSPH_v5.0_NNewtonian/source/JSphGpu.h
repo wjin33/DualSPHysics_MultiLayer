@@ -207,7 +207,6 @@ protected:
   //<vs_non-Newtonian>
   float *Visco_etag;		  ///<Effective viscosity.  
   tsymatrix3f *SpsTaug;       ///<SPS sub-particle stress tensor.
-  //tsymatrix3f* Sigmag;             /// stress tensor diagonal components
   tsymatrix3f *Pstraing;      /// plastic strain
   tsymatrix3f *SpsGradvelg;  ///<Velocity gradients.
   tsymatrix3f *D_tensorg;     ///<Deformation tensor. 

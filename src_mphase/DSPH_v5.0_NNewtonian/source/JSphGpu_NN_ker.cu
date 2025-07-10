@@ -2174,8 +2174,8 @@ __global__ void KerInteractionForcesFluid_NN_SPH_PressGrad(unsigned n,unsigned p
   ,const float4 *poscell
   ,const float4 *velrhop,const typecode *code,const unsigned *idp
   ,float *viscdt,float *ar,float3 *ace,float *delta
-  ,TpShifting shiftmode,float4 *shiftposfs, float *volfrac
-  ,const float2*sigma, float2 *rsigma)
+  ,TpShifting shiftmode, float4 *shiftposfs, float *volfrac
+  ,const float2 *sigma, float2 *rsigma)
 {
   const unsigned p=blockIdx.x*blockDim.x+threadIdx.x; //-Number of particle.
   float3 usp1 = make_float3(0,0,0); // soil interpolation velocity at fluid particle
@@ -2335,7 +2335,7 @@ void Interaction_ForcesGpuT_NN_SPH(const StInterParmsg &t)
       KerInteractionForcesFluid_NN_SPH_PressGrad<tker,ftmode,tvisco,tdensity,shift,true ><<<sgridf,t.bsfluid,0,t.stm>>>
         (t.fluidnum,t.fluidini,dvd.scelldiv,dvd.nc,dvd.cellzero,dvd.beginendcell,dvd.cellfluid,t.dcell
           ,t.ftomassp,(float3*)t.gradvel,t.poscell,t.velrhop,t.code,t.idp
-          ,t.viscdt,t.ar,t.ace,t.delta,t.shiftmode,t.shiftposfs,t.volfrac,(float2*)t.sigma,(float2*)t.rsigma);
+          ,t.viscdt,t.ar,t.ace,t.delta,t.shiftmode, t.shiftposfs,t.volfrac,(float2*)t.sigma,(float2*)t.rsigma);
 
       if(tvisco !=VISCO_SoilWater)KerInteractionForcesFluid_NN_SPH_Visco_eta<ftmode,tvisco,true ><<<sgridf,t.bsfluid,0,t.stm>>>
         (t.fluidnum,t.fluidini,t.viscob,t.visco_eta,t.velrhop,dvd.scelldiv,dvd.nc,dvd.cellzero,dvd.beginendcell,dvd.cellfluid,t.dcell
@@ -2451,6 +2451,7 @@ template<TpKernel tker,TpFtMode ftmode> void Interaction_ForcesNN_gt1(const StIn
   if(t.tvisco==VISCO_ConstEq)		      Interaction_ForcesNN_gt2<tker,ftmode,VISCO_ConstEq>(t);
   else if(t.tvisco==VISCO_LaminarSPS)	Interaction_ForcesNN_gt2<tker,ftmode,VISCO_LaminarSPS>(t);
   else if(t.tvisco==VISCO_Artificial)	Interaction_ForcesNN_gt2<tker,ftmode,VISCO_Artificial>(t);
+  else if(t.tvisco==VISCO_SoilWater)	Interaction_ForcesNN_gt2<tker,ftmode,VISCO_SoilWater>(t);
 #endif
 }
 //==============================================================================

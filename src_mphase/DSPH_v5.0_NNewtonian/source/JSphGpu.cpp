@@ -555,7 +555,7 @@ void JSphGpu::ReserveBasicArraysGpu(){
   if(MultiPhase)AuxNNg=ArraysGpu->ReserveFloat();  //<vs_non-Newtonian>
   if(!MultiPhase && TVisco==VISCO_LaminarSPS)SpsTaug=ArraysGpu->ReserveSymatrix3f();  //<vs_non-Newtonian>
   if (TVisco == VISCO_SoilWater) {
-      //SpsTaug = ArraysGpu->ReserveSymatrix3f();
+      SpsTaug = ArraysGpu->ReserveSymatrix3f();
       //Sigmag = ArraysGpu->ReserveSymatrix3f(); //This is used for stress output
       VolFracg = ArraysGpu->ReserveFloat();
       Pstraing = ArraysGpu->ReserveSymatrix3f();

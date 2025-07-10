@@ -144,7 +144,7 @@ typedef struct StrInterParmsg{
   //=====mdbr
   const tsymatrix3f* sigma;
   tsymatrix3f* rsigma;
-
+  
   ///Structure constructor.
   StrInterParmsg(
      bool simulate2d_
@@ -163,13 +163,13 @@ typedef struct StrInterParmsg{
     ,const double2 *posxy_,const double *posz_,const float4 *poscell_
     ,const float4 *velrhop_,const unsigned *idp_,const typecode *code_
     ,const float *ftomassp_
-    ,float *viscdt_,float *viscetadt_,float* ar_,float3 *ace_,float *delta_
+    ,float *viscdt_,float *viscetadt_,float* ar_,float3 *ace_, float *delta_
     ,float* visco_eta_, tsymatrix3f *spstau_, tsymatrix3f *pstrain_, tsymatrix3f *spsgradvel_, tsymatrix3f *d_tensor_, float *volfrac_, float *auxnn_  //<vs_non-Newtonian>
     ,const tsymatrix3f *sigma_, tsymatrix3f* rsigma_
     ,float4 *shiftposfs_
     ,cudaStream_t stm_
     ,StKerInfo *kerinfo_)
-  {
+    {
     //-Configuration options.
     simulate2d=simulate2d_;
     symmetry=symmetry_; //<vs_syymmetry>

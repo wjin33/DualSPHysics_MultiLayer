@@ -111,6 +111,7 @@ JSph::JSph(bool cpu,bool mgpu,bool withmpi):Cpu(cpu),Mgpu(mgpu),WithMpi(withmpi)
   NuxLib=NULL;
   PhaseCte=NULL;    //<vs_non-Newtonian>
   PhaseArray=NULL;  //<vs_non-Newtonian>
+  PhaseDruckerPrager=NULL;
   InitVars();
 }
 
@@ -150,6 +151,7 @@ JSph::~JSph(){
   delete NuxLib;        NuxLib=NULL;
   delete[] PhaseCte;    PhaseCte=NULL;    //<vs_non-Newtonian>
   delete[] PhaseArray;  PhaseArray=NULL;  //<vs_non-Newtonian>
+  delete[] PhaseDruckerPrager;  PhaseDruckerPrager=NULL;  //<vs_non-Newtonian>
 }
 
 //==============================================================================
@@ -1211,7 +1213,7 @@ void JSph::LoadCaseConfig(const JSphCfgRun *cfg){
       if(InOut)Run_Exceptioon("Multiphase formulations are not supported with inlet/outlet option.");
       // if(TBoundary==BC_MDBC)Run_Exceptioon("Multiphase formulations are not supported with BC_mDBC.");x
       if(TVisco==VISCO_Artificial)Log->PrintWarning("You are running non-Newtonian formulations using artificial viscosity.");
-      InitDPPhase(&xml,"case.execution.special.nnphase");
+      InitDPPhase(&xml,"case.execution.special.druckerprager");
       ConfigConstantsMP_DP();
     }		
   }
@@ -2311,6 +2313,7 @@ void JSph::ConfigSaveData(unsigned piece,unsigned pieces,std::string div){
     case VISCO_Artificial:  parthead.ConfigVisco(JPartDataHead::VISCO_Artificial,Visco,ViscoBoundFactor);  break;
     case VISCO_LaminarSPS:  parthead.ConfigVisco(JPartDataHead::VISCO_LaminarSPS,Visco,ViscoBoundFactor);  break;
     case VISCO_ConstEq:     parthead.ConfigVisco(JPartDataHead::VISCO_LaminarSPS,Visco,ViscoBoundFactor);  break; //<vs_non-Newtonian>
+    case VISCO_SoilWater:   break;
     default: Run_Exceptioon("Viscosity type is unknown.");
   }
   if(SvData&SDAT_Binx){
@@ -3235,7 +3238,7 @@ void JSph::InitMultiPhase(const JXml *sxml,std::string xmlpath) {
 void JSph::InitDPPhase(const JXml *sxml,std::string xmlpath) {
   Log->Print("");
   Log->Print("[Drucker-Prager-phase configuration]\n");
-  TiXmlNode* node=sxml->GetNodeSimple("case.execution.special.DruckerPrager");
+  TiXmlNode* node=sxml->GetNodeSimple("case.execution.special.druckerprager");
   sxml->CheckElementNames(node->ToElement(),true,"*phase");
   PhaseCount=sxml->CountElements(node,"phase");
 
@@ -3244,7 +3247,7 @@ void JSph::InitDPPhase(const JXml *sxml,std::string xmlpath) {
   if(PhaseCount<1)Run_Exceptioon("The number of phases is invalid.");
   TiXmlElement* ele=node->FirstChildElement("phase");
   for(unsigned c=0; ele; c++) {
-    sxml->CheckElementNames(ele,true,"DP_Cs0 DP_visco DP_rho DP_VolFrac DP_G DP_K MC_phi MC_c MC_psi DP_wallfriction DP_Dc Drag_alphad Drag_betad");
+    sxml->CheckElementNames(ele,true,"DP_csound DP_visco DP_rhop DP_VolFrac DP_G DP_K MC_phi MC_c MC_psi DP_wallfriction DP_Dc Drag_alphad Drag_betad phasetype");
     const word mkfluid=sxml->GetAttributeWord(ele,"mkfluid");
     PhaseDruckerPrager[c].mkfluid=mkfluid;
     unsigned cmk=MkInfo->GetMkBlockByMkFluid(PhaseDruckerPrager[c].mkfluid);
@@ -3359,7 +3362,9 @@ void JSph::LoadMultiphaseData(unsigned np,const unsigned *idp,const typecode *co
     if(CODE_IsFluid(cod)) {
       unsigned cp=CODE_GetTypeValue(cod);
       if(cp>=PhaseCount)Run_Exceptioon("Fluid particle without phase information...");
-      velrhop[p].w=PhaseArray[cp].rho;
+      if (PhaseArray) velrhop[p].w=PhaseArray[cp].rho;
+      //if (PhaseCte) velrhop[p].w=PhaseCte[cp].rho;
+      if (PhaseDruckerPrager)velrhop[p].w=PhaseDruckerPrager[cp].DP_rho;
       //auxNN[p] = PhaseCte[cp].visco; //this may be used to load any auxilary value
     }
   }

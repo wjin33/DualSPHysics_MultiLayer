@@ -28,7 +28,7 @@
 
 #define MAXNUMBERPHASE 10
 
-__constant__ StPhaseDruckerPrager PHASEDRUCKERPRAGER[MAXNUMBERPHASE];
+__constant__ StPhaseSoilWater PHASESOILWATER[MAXNUMBERPHASE];
 
 namespace cusphs{
 #include "FunctionsBasic_iker.h"
@@ -452,11 +452,11 @@ template<bool floating,bool shift,bool inout> __global__ void KerComputeStepSymp
         sigma_e.yz = float(double(sigmapre[p].yz) + rsigma[p].yz * dtm);
         sigma_e.xz = float(double(sigmapre[p].xz) + rsigma[p].xz * dtm);
         //-Plastic corrector
-        const float DP_K=PHASEDRUCKERPRAGER[pp1].DP_K; ///<  Elastic bulk modulus
-        const float DP_G=PHASEDRUCKERPRAGER[pp1].DP_G;    ///< Elastic shear modulus
-        const float MC_phi=PHASEDRUCKERPRAGER[pp1].MC_phi;    ///< Friction angle in MC model, to be converted to DP yield surface parameters DP_AlphaPhi and DP_kc
-        const float MC_c= PHASEDRUCKERPRAGER[pp1].MC_c;    ///< Cohesion in MC model, to be converted to DP yield surface parameters DP_AlphaPhi and DP_kc
-        const float MC_psi = PHASEDRUCKERPRAGER[pp1].MC_psi;    ///< Dilatancy angle in MC model, to be converted to DP non-associate flow rule parameter DP_psi
+        const float DP_K=PHASESOILWATER[pp1].DP_K; ///<  Elastic bulk modulus
+        const float DP_G=PHASESOILWATER[pp1].DP_G;    ///< Elastic shear modulus
+        const float MC_phi=PHASESOILWATER[pp1].MC_phi;    ///< Friction angle in MC model, to be converted to DP yield surface parameters DP_AlphaPhi and DP_kc
+        const float MC_c= PHASESOILWATER[pp1].MC_c;    ///< Cohesion in MC model, to be converted to DP yield surface parameters DP_AlphaPhi and DP_kc
+        const float MC_psi = PHASESOILWATER[pp1].MC_psi;    ///< Dilatancy angle in MC model, to be converted to DP non-associate flow rule parameter DP_psi
         //sigmanew=sigma_e;
         ConsRelationEP(sigma_e,sigmanew,DP_K,DP_G,MC_phi,MC_c,MC_psi);
         //-Update stress/equivelant plastic strain
@@ -580,11 +580,11 @@ template<bool floating,bool shift,bool inout> __global__ void KerComputeStepSymp
         sigma_e.yz = float(double(sigmapre[p].yz) + rsigma[p].yz*dt);
         sigma_e.xz = float(double(sigmapre[p].xz) + rsigma[p].xz*dt);
         //-Plastic corrector
-        const float DP_K=PHASEDRUCKERPRAGER[pp1].DP_K; ///<  Elastic bulk modulus
-        const float DP_G=PHASEDRUCKERPRAGER[pp1].DP_G;    ///< Elastic shear modulus
-        const float MC_phi=PHASEDRUCKERPRAGER[pp1].MC_phi;    ///< Friction angle in MC model, to be converted to DP yield surface parameters DP_AlphaPhi and DP_kc
-        const float MC_c= PHASEDRUCKERPRAGER[pp1].MC_c;    ///< Cohesion in MC model, to be converted to DP yield surface parameters DP_AlphaPhi and DP_kc
-        const float MC_psi = PHASEDRUCKERPRAGER[pp1].MC_psi;    ///< Dilatancy angle in MC model, to be converted to DP non-associate flow rule parameter DP_psi
+        const float DP_K=PHASESOILWATER[pp1].DP_K; ///<  Elastic bulk modulus
+        const float DP_G=PHASESOILWATER[pp1].DP_G;    ///< Elastic shear modulus
+        const float MC_phi=PHASESOILWATER[pp1].MC_phi;    ///< Friction angle in MC model, to be converted to DP yield surface parameters DP_AlphaPhi and DP_kc
+        const float MC_c= PHASESOILWATER[pp1].MC_c;    ///< Cohesion in MC model, to be converted to DP yield surface parameters DP_AlphaPhi and DP_kc
+        const float MC_psi = PHASESOILWATER[pp1].MC_psi;    ///< Dilatancy angle in MC model, to be converted to DP non-associate flow rule parameter DP_psi
         //sigmanew=sigma_e;
         ConsRelationEP(sigma_e,sigmanew,DP_K,DP_G,MC_phi,MC_c,MC_psi);
         //-Update stress/equivelant plastic strain

@@ -3,7 +3,7 @@
 #=============== Compilation Options (YES/NO) ===============
 USE_GCC5=YES
 USE_DEBUG=YES
-USE_FAST_MATH=YES
+USE_FAST_MATH=NO
 USE_NATIVE_CPU_OPTIMIZATIONS=NO
 COMPILE_VTKLIB=YES
 COMPILE_NUMEXLIB=YES
@@ -172,7 +172,8 @@ NCC=$(DIRTOOLKIT)/bin/nvcc
 ifeq ($(USE_DEBUG), NO)
   NCCFLAGS+=-c $(GENCODE) -O3 -ccbin $(CC)
 else
-  NCCFLAGS+=-c $(GENCODE) -O0 -ccbin $(CC) -g
+  #NCCFLAGS+=-c $(GENCODE) -O0 -ccbin $(CC) -g
+  NCCFLAGS+=-c $(GENCODE) -G -g -O0 -ccbin $(CC) # need to be adjusted such that cuda-gdb is able to run without optimization. Also set breakpoint before run. won't be able to step like on cpu.
 endif
 ifeq ($(USE_FAST_MATH), YES)
   NCCFLAGS+= -use_fast_math

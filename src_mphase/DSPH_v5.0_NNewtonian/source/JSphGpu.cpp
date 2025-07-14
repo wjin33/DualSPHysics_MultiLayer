@@ -650,7 +650,7 @@ void JSphGpu::ConstantDataUp(){
   cusph::CteInteractionUp(&ctes);
   //<vs_non-Newtonian>
   if (MultiPhase) {
-      if (TVisco == VISCO_SoilWater) cusphNN::CteInteractionUp_NN(PhaseCount, PhaseDruckerPrager);
+      if (TVisco == VISCO_SoilWater) cusphNN::CteInteractionUp_NN(PhaseCount, PhaseSoilWater);
       else cusphNN::CteInteractionUp_NN(PhaseCount, PhaseCte, PhaseArray);
   }
   //CheckCudaError("CteInteractionUp_NN", "Failed copying constants to GPU.");
@@ -971,7 +971,7 @@ void JSphGpu::InitRunGpu(){
       //cudaMemset(Forceg,0,sizeof(float3)*Np);
       cudaMemset(Pstraing,0,sizeof(tsymatrix3f)*Np);
       cudaMemset(VolFracg,0,sizeof(float)*Np);
-      cusph::InitializeVolFracRhoTauPstrain(Np,Npb,Codeg,SpsTaug,Pstraing,Velrhopg,VolFracg,TVisco); //Need to be updated
+      cusphNN::InitializeVolFracRhoTauPstrain(Np,Npb,Codeg,SpsTaug,Pstraing,Velrhopg,VolFracg,TVisco); //Need to be updated
   }          
   if(CaseNfloat)InitFloating();
   if(MotionVelg)cudaMemset(MotionVelg,0,sizeof(float3)*Np);

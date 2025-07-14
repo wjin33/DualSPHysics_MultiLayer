@@ -1,0 +1,139 @@
+
+
+ <GENCASE>  Copyright (c) 2020 by Dr Jose M. Dominguez
+ All rights reserved.
+
+ GenCase is a free tool for DualSPHysics simulations.
+ DualSPHysics project is an international collaboration between
+ University of Vigo (Spain) and University of Manchester (UK).
+
+ Redistribution and use in source and binary forms, with or without
+ modification, are permitted provided that the following conditions
+ are met:
+ * Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.
+ * Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in the
+   documentation and/or other materials provided with the distribution.
+ * Neither the name of the GenCase nor the names of its contributors
+   may be used to endorse or promote products derived from this software
+   without specific prior written permission.
+
+ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER BE LIABLE FOR ANY
+ DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+GenCase v5.0.278c (30-10-2023)
+===============================
+OmpThreads: 16
+
+[LoadXMLInit]
+List: GeometryForNormals
+List: MAIN
+
+Total operations: 39
+[LoadXMLInit-End  time:0.001s]
+
+[Draw]
+List of available variables: Gravity_x=[0]  Gravity_y=[0]  Gravity_z=[-9.81]  Rhop0=[1500]  MResId=[0]  Dp=[0.05]  PosMin_x=[-1]  PosMin_y=[-1]  PosMin_z=[-1]  PosMax_x=[3.3]  PosMax_y=[1.1]  PosMax_z=[1.1]  CaseName=["TestDamBreakSoilWater"]  Data2D=[0]  Data2DPosy=[0]  H=[0.1]  MassBound=[0.1875]  MassFluid=[0.1875]
+
+Mk size: 1 bytes
+Case limits: (-1,-1,-1) - (3.3,1.1,1.1)
+Distance between points (Dp): 0.05
+Reference position: (0,0,0)
+Case domain: (0,0,0)-(84,41,41)
+Domain points: 85 x 42 x 42 = 149940
+Case parts: 1 x 42z
+Memory: 0.00Gb 0.14Mb (149940)
+
+> MAIN
+>> GeometryForNormals
+FileShapes> hdp_Actual.vtk  shapes:17  points:36   (time:0.001s)
+<< GeometryForNormals (8+5+1)
+FileDbgDomains> TestDamBreakSoilWater_out/TestDamBreakSoilWater_dbg-fillbox.vtk  domains:1
+FileShapes> _Actual.vtk  shapes:51  points:108   (time:0.000s)
+FileDbgDomains> TestDamBreakSoilWater_out/TestDamBreakSoilWater_dbg-fillbox.vtk  domains:2
+FileShapes> _Actual.vtk <---- EMPTY FILE NOT SAVED
+<MAIN (Operations= 27+12+3 = 42)
+
+Triangles: 136 (0 ignored)
+[Draw-End  time:0.004s]
+
+[LoadsXMLConfig]
+Execution parameters.
+Initials configuration.
+Floating bodies configuration.
+Properties configuration.
+Predefined motion configuration.
+[LoadsXMLConfig-End  time:0.000s]
+
+[PreparePoints]
+Computing Vtk-Cells data...  (time:0.006s)
+BitSizeTot: 18 (2 + 7+5+4)
+Points loaded: 13222
+Sorting points by Z...
+Sorting points by Mk...
+
+List of Points:
+Points -> Fixed-Boundary particles:
+  block[  0] (mk: 10):   8826  -->    8826
+  block[  1] (mk: 11):    216  -->     216
+Points -> Fluid particles:
+  block[  2] (mk:  1):   2470  -->    2470
+  block[  3] (mk:  2):   1710  -->    1710
+
+Particle summary:
+  Fixed....: 9042  id:(0-9041)   MKs:2 (10-11)
+  Moving...: 0
+  Floating.: 0
+  Fluid....: 4180  id:(9042-13221)   MKs:2 (1-2)
+
+Total particles: 13222 (bound=9042 (fx=9042 mv=0 ft=0) fluid=4180)
+Total MK blocks: 4 (bound=2 (fx=2 mv=0 ft=0) fluid=2)
+
+Maximum depth: 0.45 (automatic)
+Speed of system: 2.10107 (automatic)
+Speed of sound: max(coefsound*speedsystem,10*sqrt(g*depth))
+Speed of sound: 42.0214 max(42.0214,21.0107)
+Speed of sound: 200 (fixed)
+
+Coefh:1.154701 (hdp:2.000000)
+
+[PreparePoints-End  time:0.008s]
+
+[SaveCase3D]
+TestDamBreakSoilWater_out/TestDamBreakSoilWater_MkCells.vtk  (time:0.000s, shapes:42, points:168)
+TestDamBreakSoilWater_out/TestDamBreakSoilWater.bi4<double>  (time:0.000s)
+TestDamBreakSoilWater_out/TestDamBreakSoilWater_All.vtk  (time: 0.001s)
+TestDamBreakSoilWater_out/TestDamBreakSoilWater_Bound.vtk  (time: 0.000s)
+TestDamBreakSoilWater_out/TestDamBreakSoilWater_Fluid.vtk  (time: 0.000s)
+TestDamBreakSoilWater_out/TestDamBreakSoilWater.xml  (time:0.001s)
+Computing normals data...
+  Evaluating 9042 particles with 17 shapes (distance 2x H = 0.2).
+  Time for computing 13791 normals: 0.002s.
+  Non-zero particle normals: 9042/9042    Normals size range: (0.025000 - 0.216506).
+  TestDamBreakSoilWater_out/TestDamBreakSoilWater_Normals.vtk
+  TestDamBreakSoilWater_out/TestDamBreakSoilWater_Normals.nbi4  (time:0.006s)
+
+Save files time: 0.008s
+
+Particle limits:
+  X range: -0.1 to 3.2 [m]
+  Y range: -0.1 to 1.05 [m]
+  Z range: -0.1 to 0.5 [m]
+
+[SaveCase3D-End  time:0.009s]
+
+
+Time of execution: 0.023 sec. (16 threads)
+
+Finished execution (code=0).
+

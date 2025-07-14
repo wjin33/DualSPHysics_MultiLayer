@@ -111,7 +111,7 @@ JSph::JSph(bool cpu,bool mgpu,bool withmpi):Cpu(cpu),Mgpu(mgpu),WithMpi(withmpi)
   NuxLib=NULL;
   PhaseCte=NULL;    //<vs_non-Newtonian>
   PhaseArray=NULL;  //<vs_non-Newtonian>
-  PhaseDruckerPrager=NULL;
+  PhaseSoilWater=NULL;
   InitVars();
 }
 
@@ -151,7 +151,7 @@ JSph::~JSph(){
   delete NuxLib;        NuxLib=NULL;
   delete[] PhaseCte;    PhaseCte=NULL;    //<vs_non-Newtonian>
   delete[] PhaseArray;  PhaseArray=NULL;  //<vs_non-Newtonian>
-  delete[] PhaseDruckerPrager;  PhaseDruckerPrager=NULL;  //<vs_non-Newtonian>
+  delete[] PhaseSoilWater;  PhaseSoilWater=NULL;  //<vs_non-Newtonian>
 }
 
 //==============================================================================
@@ -1208,13 +1208,13 @@ void JSph::LoadCaseConfig(const JSphCfgRun *cfg){
       InitMultiPhase(&xml,"case.execution.special.nnphases");
       ConfigConstantsMP();
     } //<vs_non-Newtonian_end>
-    if(xml.GetNodeSimple("case.execution.special.druckerprager",true)) {
+    if(xml.GetNodeSimple("case.execution.special.soilwater",true)) {
       //For v5.0 NN version disable some options
       if(InOut)Run_Exceptioon("Multiphase formulations are not supported with inlet/outlet option.");
       // if(TBoundary==BC_MDBC)Run_Exceptioon("Multiphase formulations are not supported with BC_mDBC.");x
       if(TVisco==VISCO_Artificial)Log->PrintWarning("You are running non-Newtonian formulations using artificial viscosity.");
-      InitDPPhase(&xml,"case.execution.special.druckerprager");
-      ConfigConstantsMP_DP();
+      InitSWDPPhase(&xml,"case.execution.special.soilwater");
+      ConfigConstantsMP_SWDP();
     }		
   }
   if(TVisco==VISCO_ConstEq&&!MultiPhase)Run_Exceptioon("ViscoTreatment 'Constitutive  eq.' not valid for Single-phase classic formulation.");
@@ -3235,69 +3235,96 @@ void JSph::InitMultiPhase(const JXml *sxml,std::string xmlpath) {
 //==============================================================================
 // Load related data and adjusts Multi-phase for Drucker-Prager elastoplasticity
 //==============================================================================
-void JSph::InitDPPhase(const JXml *sxml,std::string xmlpath) {
+void JSph::InitSWDPPhase(const JXml *sxml,std::string xmlpath) {
   Log->Print("");
   Log->Print("[Drucker-Prager-phase configuration]\n");
-  TiXmlNode* node=sxml->GetNodeSimple("case.execution.special.druckerprager");
+  TiXmlNode* node=sxml->GetNodeSimple("case.execution.special.soilwater");
   sxml->CheckElementNames(node->ToElement(),true,"*phase");
   PhaseCount=sxml->CountElements(node,"phase");
 
   Log->Printf("==: PhaseCount:%d",PhaseCount);
-  PhaseDruckerPrager=new StPhaseDruckerPrager[PhaseCount]; 	memset(PhaseDruckerPrager,0,sizeof(StPhaseDruckerPrager)*PhaseCount);
+  PhaseSoilWater=new StPhaseSoilWater[PhaseCount]; 	memset(PhaseSoilWater,0,sizeof(StPhaseSoilWater)*PhaseCount);
   if(PhaseCount<1)Run_Exceptioon("The number of phases is invalid.");
   TiXmlElement* ele=node->FirstChildElement("phase");
   for(unsigned c=0; ele; c++) {
-    sxml->CheckElementNames(ele,true,"DP_csound DP_visco DP_rhop DP_VolFrac DP_G DP_K MC_phi MC_c MC_psi DP_wallfriction DP_Dc Drag_alphad Drag_betad phasetype");
+    sxml->CheckElementNames(ele,true,"mw_csound mw_visco mw_rhop mw_tau_yield mw_tau_max mw_Bi_multi mw_m_NN mw_n_NN mw_VolFrac DP_csound DP_visco DP_rhop DP_VolFrac DP_G DP_K MC_phi MC_c MC_psi DP_wallfriction DP_Dc Drag_alphad Drag_betad phasetype");
     const word mkfluid=sxml->GetAttributeWord(ele,"mkfluid");
-    PhaseDruckerPrager[c].mkfluid=mkfluid;
-    unsigned cmk=MkInfo->GetMkBlockByMkFluid(PhaseDruckerPrager[c].mkfluid);
+    PhaseSoilWater[c].mkfluid=mkfluid;
+    unsigned cmk=MkInfo->GetMkBlockByMkFluid(PhaseSoilWater[c].mkfluid);
     if(cmk>=MkInfo->Size())Run_Exceptioon(fun::PrintStr("No particles with mkfluid=%u",mkfluid));
     const JSphMkBlock* bk=MkInfo->Mkblock(cmk);
 
     //PhaseArray holds physical proprerties of phases
-    PhaseDruckerPrager[c].phaseid=c;
-    PhaseDruckerPrager[c].DP_rho=sxml->ReadElementFloat(ele,"DP_rhop","value");
-    PhaseDruckerPrager[c].DP_Cs0=sxml->ReadElementFloat(ele,"DP_csound","value",true);
-    PhaseDruckerPrager[c].DP_visco=sxml->ReadElementFloat(ele,"DP_visco","value");
-    PhaseDruckerPrager[c].idbegin=bk->Begin;
-    PhaseDruckerPrager[c].count=bk->Count;
-    PhaseDruckerPrager[c].DP_wallfriction = sxml->ReadElementFloat(ele,"DP_wallfriction","value");
-    PhaseDruckerPrager[c].DP_VolFrac=sxml->ReadElementFloat(ele,"DP_VolFrac","value");
-    PhaseDruckerPrager[c].DP_G=sxml->ReadElementFloat(ele,"DP_G","value");
-    PhaseDruckerPrager[c].DP_K= sxml->ReadElementFloat(ele, "DP_K", "value");
-    PhaseDruckerPrager[c].MC_phi=sxml->ReadElementFloat(ele,"MC_phi","value");
-    PhaseDruckerPrager[c].MC_c=sxml->ReadElementFloat(ele,"MC_c","value");
-    PhaseDruckerPrager[c].MC_psi=sxml->ReadElementFloat(ele,"MC_psi","value");
-    PhaseDruckerPrager[c].DP_Dc=sxml->ReadElementFloat(ele,"DP_Dc","value");
-    PhaseDruckerPrager[c].Drag_alphad=sxml->ReadElementFloat(ele,"Drag_alphad","value");
-    PhaseDruckerPrager[c].Drag_betad=sxml->ReadElementFloat(ele,"Drag_betad","value");
-    PhaseDruckerPrager[c].phasetype=sxml->ReadElementUnsigned(ele,"phasetype","value");   //only 0 in v 5.0 supported
+    PhaseSoilWater[c].phaseid=c;
+    PhaseSoilWater[c].idbegin=bk->Begin;
+    PhaseSoilWater[c].count=bk->Count;
+    PhaseSoilWater[c].phasetype=sxml->ReadElementUnsigned(ele,"phasetype","value");   //only 0 in v 5.0 supported
+    if(PhaseSoilWater[c].mkfluid == 0) { // multiphase water phase
+      PhaseSoilWater[c].mw_Cs0=sxml->ReadElementFloat(ele,"mw_csound","value",true);
+      PhaseSoilWater[c].mw_visco=sxml->ReadElementFloat(ele,"mw_visco","value");
+      PhaseSoilWater[c].mw_rho=sxml->ReadElementFloat(ele,"mw_rhop","value",true);
+      PhaseSoilWater[c].mw_tau_yield=sxml->ReadElementFloat(ele,"mw_tau_yield","value");
+      PhaseSoilWater[c].mw_tau_max=sxml->ReadElementFloat(ele,"mw_tau_max","value");
+      PhaseSoilWater[c].mw_Bi_multi=sxml->ReadElementFloat(ele,"mw_Bi_multi","value");
+      PhaseSoilWater[c].mw_m_NN=sxml->ReadElementFloat(ele,"mw_m_NN","value");
+      PhaseSoilWater[c].mw_n_NN= sxml->ReadElementFloat(ele, "mw_n_NN", "value");
+      PhaseSoilWater[c].mw_VolFrac=sxml->ReadElementFloat(ele,"mw_VolFrac","value");
+   }
+    if(PhaseSoilWater[c].mkfluid == 1) { // drucker-prager soil phase
+      PhaseSoilWater[c].DP_Cs0=sxml->ReadElementFloat(ele,"DP_csound","value",true);
+      PhaseSoilWater[c].DP_visco=sxml->ReadElementFloat(ele,"DP_visco","value");
+      PhaseSoilWater[c].DP_rho=sxml->ReadElementFloat(ele,"DP_rhop","value");
+      PhaseSoilWater[c].DP_VolFrac=sxml->ReadElementFloat(ele,"DP_VolFrac","value");
+      PhaseSoilWater[c].DP_G=sxml->ReadElementFloat(ele,"DP_G","value");
+      PhaseSoilWater[c].DP_K= sxml->ReadElementFloat(ele, "DP_K", "value");
+      PhaseSoilWater[c].MC_phi=sxml->ReadElementFloat(ele,"MC_phi","value");
+      PhaseSoilWater[c].MC_c=sxml->ReadElementFloat(ele,"MC_c","value");
+      PhaseSoilWater[c].MC_psi=sxml->ReadElementFloat(ele,"MC_psi","value");
+      PhaseSoilWater[c].DP_wallfriction = sxml->ReadElementFloat(ele,"DP_wallfriction","value");
+      PhaseSoilWater[c].DP_Dc=sxml->ReadElementFloat(ele,"DP_Dc","value");
+      PhaseSoilWater[c].Drag_alphad=sxml->ReadElementFloat(ele,"Drag_alphad","value");
+      PhaseSoilWater[c].Drag_betad=sxml->ReadElementFloat(ele,"Drag_betad","value");
+    }
     ele=ele->NextSiblingElement("phase");
   }
   //-Sort phases according mkfluid.
-  for(unsigned c=0; c<PhaseCount-1; c++)for(unsigned c2=c+1; c2<PhaseCount; c2++)if(PhaseDruckerPrager[c].mkfluid>PhaseDruckerPrager[c2].mkfluid){
-    StPhaseDruckerPrager a=PhaseDruckerPrager[c];
-    PhaseDruckerPrager[c]=PhaseDruckerPrager[c2];
-    PhaseDruckerPrager[c2]=a;
+  for(unsigned c=0; c<PhaseCount-1; c++)for(unsigned c2=c+1; c2<PhaseCount; c2++)if(PhaseSoilWater[c].mkfluid>PhaseSoilWater[c2].mkfluid){
+    StPhaseSoilWater a=PhaseSoilWater[c];
+    PhaseSoilWater[c]=PhaseSoilWater[c2];
+    PhaseSoilWater[c2]=a;
   }
   //-Shows phase information.
   Log->Printf("PhaseCount:%d",PhaseCount);
   for(unsigned c=0; c<=PhaseCount-1; c++) {
-    const StPhaseDruckerPrager &ar=PhaseDruckerPrager[c];
-    Log->Printf("Phase %d",c);
-    Log->Printf("  DP_rhop......: %f",ar.DP_rho);
-    if(ar.DP_Cs0)Log->Printf("  DP_Cs0......: %f",ar.DP_Cs0);
-    Log->Printf("  DP artificial alpha: %f",ar.DP_visco);
-    Log->Printf("  DP wall friction: %f",ar.DP_wallfriction);
-    Log->Printf("  DP volumetric fraction: %f",ar.DP_VolFrac);
-    Log->Printf("  DP Shear modulus: %f",ar.DP_G);
-    Log->Printf("  DP Elastic modulus: %f",ar.DP_K);
-    Log->Printf("  MC_phi: %f",ar.MC_phi);
-    Log->Printf("  MC_c: %f",ar.MC_c);
-    Log->Printf("  MC_psi: %f",ar.MC_psi);
-    Log->Printf("  DP_Dc: %f",ar.DP_Dc);
-    Log->Printf("  DP Drag_alphad: %f",ar.Drag_alphad);
-    Log->Printf("  DP Drag_betad: %f",ar.Drag_betad);
+    const StPhaseSoilWater &ar=PhaseSoilWater[c];
+    if(c == 0){
+      Log->Printf("Phase %d",c);
+      Log->Printf("  mw_rhop......: %f",ar.mw_rho);
+      if(ar.mw_Cs0)Log->Printf("  mw_Cs0......: %f",ar.mw_Cs0);
+      Log->Printf("  mw artificial alpha: %f",ar.mw_visco);
+      Log->Printf("  mw specific yield stress (Pa m3/kg): %f",ar.mw_tau_yield);
+      Log->Printf("  mw max specific yield stress: %f",ar.mw_tau_max);
+      Log->Printf("  mw tau_max multiplier for use with Bingham model or bi-viscosity model(tau_bi=tau_max*Bi_multi): %f",ar.mw_Bi_multi);
+      Log->Printf("  mw power law coef. m (0 for Newtonian): %f",ar.mw_m_NN);
+      Log->Printf("  mw power law coef. n (1 for Newtonian): %f",ar.mw_n_NN);
+      Log->Printf("  mw volumetric fraction: %f",ar.mw_VolFrac);
+    }
+    if(c == 1){
+      Log->Printf("Phase %d",c);
+      Log->Printf("  DP_rhop......: %f",ar.DP_rho);
+      if(ar.DP_Cs0)Log->Printf("  DP_Cs0......: %f",ar.DP_Cs0);
+      Log->Printf("  DP artificial alpha: %f",ar.DP_visco);
+      Log->Printf("  DP wall friction: %f",ar.DP_wallfriction);
+      Log->Printf("  DP volumetric fraction: %f",ar.DP_VolFrac);
+      Log->Printf("  DP Shear modulus: %f",ar.DP_G);
+      Log->Printf("  DP Elastic modulus: %f",ar.DP_K);
+      Log->Printf("  MC_phi: %f",ar.MC_phi);
+      Log->Printf("  MC_c: %f",ar.MC_c);
+      Log->Printf("  MC_psi: %f",ar.MC_psi);
+      Log->Printf("  DP_Dc: %f",ar.DP_Dc);
+      Log->Printf("  DP Drag_alphad: %f",ar.Drag_alphad);
+      Log->Printf("  DP Drag_betad: %f",ar.Drag_betad);
+    }     
   }
   Log->Print("");
 }
@@ -3330,17 +3357,24 @@ void JSph::ConfigConstantsMP(){
   DtMin=(KernelH/Cs0)*CoefDtMin;
 }
 
-void JSph::ConfigConstantsMP_DP(){
+void JSph::ConfigConstantsMP_SWDP(){
   //Check if Cs0 is present for ALL phases
   bool Cs0_present=true;
-  for(unsigned c=0; c<PhaseCount; c++)if(!PhaseDruckerPrager[c].DP_Cs0)Cs0_present=false;
+  for(unsigned c=0; c<PhaseCount; c++)if(!PhaseSoilWater[c].DP_Cs0 || !PhaseSoilWater[c].mw_Cs0)Cs0_present=false;
   if(Cs0_present){
     //Compute a new Cs0 for all system
     CSP.cs0=0;
     for(unsigned c=0; c<PhaseCount; c++) {
-      CSP.cs0=max(CSP.cs0,double(PhaseDruckerPrager[c].DP_Cs0));
-      //CteB has already been calculated in InitMultiphase
-      PhaseDruckerPrager[c].mass=float(PhaseDruckerPrager[c].DP_rho*(Simulate2D ? Dp*Dp : Dp*Dp*Dp));
+      if(c == 0){
+        CSP.cs0=max(CSP.cs0,double(PhaseSoilWater[c].mw_Cs0));
+        //CteB has already been calculated in InitMultiphase
+        PhaseSoilWater[c].mass=float(PhaseSoilWater[c].mw_rho*(Simulate2D ? Dp*Dp : Dp*Dp*Dp));
+      }
+      if(c == 1){
+        CSP.cs0=max(CSP.cs0,double(PhaseSoilWater[c].DP_Cs0));
+        //CteB has already been calculated in InitMultiphase
+        PhaseSoilWater[c].mass=float(PhaseSoilWater[c].DP_rho*(Simulate2D ? Dp*Dp : Dp*Dp*Dp));
+      }      
     }
   }
   CoefDtMin*=1.0e-5f;
@@ -3364,7 +3398,7 @@ void JSph::LoadMultiphaseData(unsigned np,const unsigned *idp,const typecode *co
       if(cp>=PhaseCount)Run_Exceptioon("Fluid particle without phase information...");
       if (PhaseArray) velrhop[p].w=PhaseArray[cp].rho;
       //if (PhaseCte) velrhop[p].w=PhaseCte[cp].rho;
-      if (PhaseDruckerPrager)velrhop[p].w=PhaseDruckerPrager[cp].DP_rho;
+      if (PhaseSoilWater)velrhop[p].w=PhaseSoilWater[cp].DP_rho;
       //auxNN[p] = PhaseCte[cp].visco; //this may be used to load any auxilary value
     }
   }

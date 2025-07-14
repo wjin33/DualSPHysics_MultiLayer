@@ -26,7 +26,7 @@ You should have received a copy of the GNU Lesser General Public License along w
 
 __constant__ StPhaseCte PHASECTE[MAXNUMBERPHASE];
 __constant__ StPhaseArray PHASEARRAY[MAXNUMBERPHASE];
-//__constant__ StPhaseDruckerPrager PHASEDRUCKERPRAGER[MAXNUMBERPHASE];
+__constant__ StPhaseSoilWater PHASESOILWATER[MAXNUMBERPHASE];
 
 
 namespace cusphNN {
@@ -46,8 +46,8 @@ void CteInteractionUp_NN(unsigned phasecount,const StPhaseCte *phasecte,const St
   cudaMemcpyToSymbol(PHASECTE,phasecte,sizeof(StPhaseCte)*phasecount);
   cudaMemcpyToSymbol(PHASEARRAY,phasearray,sizeof(StPhaseArray)*phasecount);
 }
-void CteInteractionUp_NN(unsigned phasecount, const StPhaseDruckerPrager *phaseDruckerPrager){
-  cudaMemcpyToSymbol(PHASEDRUCKERPRAGER,phaseDruckerPrager,sizeof(StPhaseDruckerPrager)*phasecount);
+void CteInteractionUp_NN(unsigned phasecount, const StPhaseSoilWater *phaseSoilWater){
+  cudaMemcpyToSymbol(PHASESOILWATER,phaseSoilWater,sizeof(StPhaseSoilWater)*phasecount);
 }//DEBUG
 
 //------------------------------------------------------------------------------
@@ -187,6 +187,38 @@ void PeriodicDuplicateVerlet(unsigned n,unsigned pini,tuint3 domcells,tdouble3 p
     uint3 cellmax=make_uint3(domcells.x-1,domcells.y-1,domcells.z-1);
     dim3 sgrid=GetSimpleGridSize(n,SPHBSIZE);
     KerPeriodicDuplicateVerlet<<<sgrid,SPHBSIZE>>>(n,pini,cellmax,Double3(perinc),listp,idp,code,dcell,posxy,posz,velrhop,auxnn,velrhopm1);
+  }
+}
+
+//==============================================================================
+__global__ void kerInitializeVolFracRhoTauPstrain(unsigned n,unsigned pini,const typecode *code
+  ,float2 *tauff,float2 *pstrain, float4 *velrhop, float *VolFrac,TpVisco tvisco)
+{
+  unsigned p=blockIdx.x*blockDim.x + threadIdx.x; 
+  if(p<n){
+    const unsigned p1=p+pini;
+    const typecode pp1=CODE_GetTypeValue(code[p1]); //phase information
+    tauff[p1*3]=make_float2(0,0); //currently let the initial stress for all the particles be 0
+    tauff[p1*3+1]=make_float2(0,0);
+    tauff[p1*3+2]=make_float2(0,0);
+    pstrain[p1*3]=make_float2(0,0); //Set the initial plastic strain for all the particles to 0
+    pstrain[p1*3+1]=make_float2(0,0);
+    pstrain[p1*3+2]=make_float2(0,0);
+    VolFrac[p1] = 1.0; // Currently let water and soil phase do not overlapp initially
+                        // note if p1 is soil, VolFrac = 1 means 100% soil and if p1 is water, VolFrac = 1 means 100% water
+    if(pp1 == 1)
+    {// Don't need to worry about density of fluids, they are calculated from pressure in interaction_forces
+    velrhop[p1].w = PHASESOILWATER[pp1].DP_rho;//Need to Stores constants for the GPU interaction
+    }
+  }
+}
+
+void InitializeVolFracRhoTauPstrain(unsigned np,unsigned npb,const typecode *code, tsymatrix3f *tau, tsymatrix3f *Pstraing, float4 *Velrhopg,float *VolFracg, TpVisco tvisco, cudaStream_t stm)
+{
+  const unsigned npf=np-npb;
+  if(npf){
+    dim3 sgridf=GetSimpleGridSize(npf,SPHBSIZE);
+    kerInitializeVolFracRhoTauPstrain <<<sgridf,SPHBSIZE,0,stm>>> (npf,npb,code,(float2*)tau,(float2*)Pstraing,(float4*)Velrhopg,VolFracg,tvisco);
   }
 }
 
@@ -1256,7 +1288,7 @@ __device__ void KerInteractionForcesMultilayerGranularBox_SPH_ConsEq(bool boundp
       const typecode cod=code[p2];
       const typecode pp2=(boundp2 ? pp1 : CODE_GetTypeValue(cod)); //<vs_non-Newtonian>
       if(pp2 == 1){
-          float massp2=(boundp2 ? CTE.massb : PHASEDRUCKERPRAGER[pp2].mass); 
+          float massp2=(boundp2 ? CTE.massb : PHASESOILWATER[pp2].mass); 
           //Note if you masses are very different more than a ratio of 1.3 then: massp2 = (boundp2 ? PHASEARRAY[pp1].mass : PHASEARRAY[pp2].mass);
 
           //-Obtiene masa de particula p2 en caso de existir floatings.
@@ -1432,11 +1464,11 @@ __global__ void KerInteractionForcesFluid_NN_SPH_Visco_Stress_tensor(unsigned n,
         //  GetStressTensorMultilayerFluid_sym(dtsrp1_xx_xy,dtsrp1_xz_yy,dtsrp1_yz_zz,visco_etap1,taup1_xx_xy,taup1_xz_yy,taup1_yz_zz);
         //}
         if(pp1 == 1) {
-          const float DP_K = PHASEDRUCKERPRAGER[pp1].DP_K; ///<  Elastic bulk modulus
-          const float DP_G = PHASEDRUCKERPRAGER[pp1].DP_G;    ///< Elastic shear modulus
-          const float MC_phi = PHASEDRUCKERPRAGER[pp1].MC_phi;    ///< Friction angle in MC model, to be converted to DP yield surface parameters DP_AlphaPhi and DP_kc
-          const float MC_c = PHASEDRUCKERPRAGER[pp1].MC_c;    ///< Cohesion in MC model, to be converted to DP yield surface parameters DP_AlphaPhi and DP_kc
-          const float MC_psi = PHASEDRUCKERPRAGER[pp1].MC_psi;    ///< Dilatancy angle in MC model, to be converted to DP non-associate flow rule parameter DP_psi
+          const float DP_K = PHASESOILWATER[pp1].DP_K; ///<  Elastic bulk modulus
+          const float DP_G = PHASESOILWATER[pp1].DP_G;    ///< Elastic shear modulus
+          const float MC_phi = PHASESOILWATER[pp1].MC_phi;    ///< Friction angle in MC model, to be converted to DP yield surface parameters DP_AlphaPhi and DP_kc
+          const float MC_c = PHASESOILWATER[pp1].MC_c;    ///< Cohesion in MC model, to be converted to DP yield surface parameters DP_AlphaPhi and DP_kc
+          const float MC_psi = PHASESOILWATER[pp1].MC_psi;    ///< Dilatancy angle in MC model, to be converted to DP non-associate flow rule parameter DP_psi
           ///////////////// needs to be modified
           float2 Dpp1_xx_xy = make_float2(0,0);
           float2 Dpp1_xz_yy = make_float2(0,0);
@@ -1888,7 +1920,7 @@ __device__ void KerInteractionForcesMultilayerGranularBox_NN_SPH_PressGrad(bool 
               const typecode pp2 = (boundp2 ? pp1 : CODE_GetTypeValue(cod)); //<vs_non-Newtonian>
               float massp2; //massp2 not neccesary to go in _Box function
               if(pp2 == 0) massp2 = (boundp2 ? CTE.massb : PHASEARRAY[pp2].mass); // p2 is fluid
-              if(pp2 == 1) massp2 = (boundp2 ? CTE.massb : PHASEDRUCKERPRAGER[pp2].mass); // p2 is granular
+              if(pp2 == 1) massp2 = (boundp2 ? CTE.massb : PHASESOILWATER[pp2].mass); // p2 is granular
               //Note if you masses are very different more than a ratio of 1.3 then: massp2 = (boundp2 ? PHASEARRAY[pp1].mass : PHASEARRAY[pp2].mass);
 
               //-Obtiene masa de particula p2 en caso de existir floatings.
@@ -1922,10 +1954,10 @@ __device__ void KerInteractionForcesMultilayerGranularBox_NN_SPH_PressGrad(bool 
                    const float p_vpm = -prs * (USE_FLOATING ? ftmassp2 : massp2);
 
                    float fd_x = 0.0f, fd_y = 0.0f, fd_z = 0.0f;
-                   const float Drag_alphad = PHASEDRUCKERPRAGER[pp1].Drag_alphad;
+                   const float Drag_alphad = PHASESOILWATER[pp1].Drag_alphad;
                    const float visco = PHASECTE[pp2].visco;
-                   const float DP_Dc = PHASEDRUCKERPRAGER[pp1].DP_Dc;
-                   const float Drag_betad = PHASEDRUCKERPRAGER[pp1].Drag_betad;
+                   const float DP_Dc = PHASESOILWATER[pp1].DP_Dc;
+                   const float Drag_betad = PHASESOILWATER[pp1].Drag_betad;
                    fd_x = Drag_alphad * visco * (1 - volfracp2)*(1 - volfracp2) / volfracp2 / DP_Dc / DP_Dc * (-dvx) + Drag_betad * velrhop2.w * (1 - volfracp2) / DP_Dc * dv * (-dvx); 
                    fd_y = Drag_alphad * visco * (1 - volfracp2)*(1 - volfracp2) / volfracp2 / DP_Dc / DP_Dc * (-dvy) + Drag_betad * velrhop2.w * (1 - volfracp2) / DP_Dc * dv * (-dvy);
                    fd_z = Drag_alphad * visco * (1 - volfracp2)*(1 - volfracp2) / volfracp2 / DP_Dc / DP_Dc * (-dvz) + Drag_betad * velrhop2.w * (1 - volfracp2) / DP_Dc * dv * (-dvz);
@@ -1944,7 +1976,7 @@ __device__ void KerInteractionForcesMultilayerGranularBox_NN_SPH_PressGrad(bool 
               
               float cbar = 0.0f;
               if (tvisco != VISCO_SoilWater || pp2 == 0) cbar = max(PHASEARRAY[pp1].Cs0, PHASEARRAY[pp2].Cs0);
-              else if (pp2 == 1) cbar = PHASEDRUCKERPRAGER[pp1].DP_Cs0;
+              else if (pp2 == 1) cbar = PHASESOILWATER[pp1].DP_Cs0;
               const float dot3 = (tdensity != DDT_None || shift ? drx * frx + dry * fry + drz * frz : 0);
               //-Density derivative (DeltaSPH Molteni).
               if (tdensity == DDT_DDT && deltap1 != FLT_MAX) {
@@ -1982,7 +2014,7 @@ __device__ void KerInteractionForcesMultilayerGranularBox_NN_SPH_PressGrad(bool 
                   if((dot<0) && (pp2==1) && tvisco == VISCO_SoilWater) {
                       const float amubar=CTE.kernelh*dot_rr2;  //amubar=CTE.h*dot/(rr2+CTE.eta2);
                       const float robar=(velrhop1.w+velrhop2.w)*0.5f;
-                      const float visco_NN = PHASEDRUCKERPRAGER[pp2].DP_Cs0;
+                      const float visco_NN = PHASESOILWATER[pp2].DP_Cs0;
                       const float pi_visc=(visco_NN*cbar*amubar/robar)*massp2;
                       acep1.x +=pi_visc*frx; acep1.y +=pi_visc*fry; acep1.z +=pi_visc*frz;
                   }
@@ -2030,7 +2062,7 @@ __device__ void KerInteractionForcesMultilayerFluidBox_NN_SPH_PressGrad(bool bou
               const typecode pp2 = (boundp2 ? pp1 : CODE_GetTypeValue(cod)); //<vs_non-Newtonian>
               float massp2; //massp2 not neccesary to go in _Box function
               if(pp2 == 0) massp2 = (boundp2 ? CTE.massb : PHASEARRAY[pp2].mass); // p2 is fluid
-              if(pp2 == 1) massp2 = (boundp2 ? CTE.massb : PHASEDRUCKERPRAGER[pp2].mass); // p2 is granular
+              if(pp2 == 1) massp2 = (boundp2 ? CTE.massb : PHASESOILWATER[pp2].mass); // p2 is granular
               //Note if you masses are very different more than a ratio of 1.3 then: massp2 = (boundp2 ? PHASEARRAY[pp1].mass : PHASEARRAY[pp2].mass);
 
               //-Obtiene masa de particula p2 en caso de existir floatings.
@@ -2067,10 +2099,10 @@ __device__ void KerInteractionForcesMultilayerFluidBox_NN_SPH_PressGrad(bool bou
                    float fd_x;
                    float fd_y;
                    float fd_z;
-                   const float Drag_alphad = PHASEDRUCKERPRAGER[pp2].Drag_alphad;
+                   const float Drag_alphad = PHASESOILWATER[pp2].Drag_alphad;
                    const float visco = PHASECTE[pp1].visco;
-                   const float DP_Dc = PHASEDRUCKERPRAGER[pp2].DP_Dc;
-                   const float Drag_betad = PHASEDRUCKERPRAGER[pp2].Drag_betad;
+                   const float DP_Dc = PHASESOILWATER[pp2].DP_Dc;
+                   const float Drag_betad = PHASESOILWATER[pp2].Drag_betad;
                    fd_x = Drag_alphad * visco * (1 - volfracp1)*(1 - volfracp1) / volfracp1 / DP_Dc / DP_Dc * dvx + Drag_betad * velrhop1.w * (1 - volfracp1) / DP_Dc * dv * dvx; 
                    fd_y = Drag_alphad * visco * (1 - volfracp1)*(1 - volfracp1) / volfracp1 / DP_Dc / DP_Dc * dvy + Drag_betad * velrhop1.w * (1 - volfracp1) / DP_Dc * dv * dvy;
                    fd_z = Drag_alphad * visco * (1 - volfracp1)*(1 - volfracp1) / volfracp1 / DP_Dc / DP_Dc * dvz + Drag_betad * velrhop1.w * (1 - volfracp1) / DP_Dc * dv * dvz;
@@ -2274,8 +2306,8 @@ __global__ void KerInteractionForcesFluid_NN_SPH_PressGrad(unsigned n,unsigned p
     //Calculate strain/spin rate tensor for granular phase NEED VELGRADIENT
     GetStrainSpinRateTensor_sym(grap1_xx_xy_xz,grap1_yx_yy_yz,grap1_zx_zy_zz,e_tensorp1_xx_xy,e_tensorp1_xz_yy,e_tensorp1_yz_zz,w_tensorp1_xy_yz_xz);
     //Calculate stress rate tensor if p1=soil mdbr
-    const float DP_K = PHASEDRUCKERPRAGER[pp1].DP_K; ///<  Elastic bulk modulus
-    const float DP_G = PHASEDRUCKERPRAGER[pp1].DP_G;    ///< Elastic shear modulus
+    const float DP_K = PHASESOILWATER[pp1].DP_K; ///<  Elastic bulk modulus
+    const float DP_G = PHASESOILWATER[pp1].DP_G;    ///< Elastic shear modulus
     if(pp1==1)GetStressRateTensor_Elastic(e_tensorp1_xx_xy,e_tensorp1_xz_yy,e_tensorp1_yz_zz,w_tensorp1_xy_yz_xz,sigmap1_xx_xy,sigmap1_xz_yy,sigmap1_yz_zz,DP_K,DP_G,rsigmap1_xx_xy,rsigmap1_xz_yy,rsigmap1_yz_zz);
     
     //-Stores results.

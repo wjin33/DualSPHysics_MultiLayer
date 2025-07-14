@@ -207,7 +207,6 @@
 #define CODE_ToFluidInout(code,izone) (code&(~CODE_MASKTYPEVALUE))|(CODE_TYPE_FLUID_INOUT|izone)
 #define CODE_GetIzoneFluidInout(code) (code&CODE_TYPE_FLUID_INOUTMASK)
 
-
 ///Defines type of movement.
 typedef enum{ 
   MOTT_None=0,    ///<No movement.
@@ -336,11 +335,14 @@ typedef struct {
   //==================================================
   // Drucker-Prager model constitutive parameters 
   //==================================================
-    word mkfluid;				///<Mk of the phase
+    word mkfluid;				///<Mk of the phase, 0 referes to multiphase water, 1 referes to druckerprager soil.
     int phaseid;		///<ID of the phase
     unsigned idbegin;		///<First id of phase.
     unsigned count;			///<Number of particles in phase.
+    unsigned phasetype; ///<Typer of phase
     float mass;			///<Mass of the phase
+    
+    /// below are the values for drucker-prager soils
     float DP_Cs0;			///<Speed of sound of phase
     float DP_visco;		///<viscosity of the phase. 
     float DP_rho; ///Apparent density of the phase, not solid density (DP_rho_s), Dp_rho = Dp_VolFrac * Dp_rho_s
@@ -354,9 +356,22 @@ typedef struct {
     float DP_Dc; /// Characterisitc length of the soil grains, usually take as D50 for coarse grain soils.
     float Drag_alphad; /// A constant for drag force calculation, default to 150
     float Drag_betad; /// A constant for drag force calculation, default to 1.75  
-    unsigned phasetype; ///<Typer of phase
-}StPhaseDruckerPrager;
+    
+    /// below are the values for multiphase water
+    float mw_Cs0;			///<Speed of sound of phase
+    float mw_rho;       ///Density of the multipahse water
+    float mw_visco;				///<viscosity of the phase.    
+    float mw_tau_max;			///<maximum tau of the phase.
+	  float mw_Bi_multi;			///<viscosity multiplier for bi-visocity model of the phase.
+    float mw_m_NN;					///<HBP model n parameter
+    float mw_n_NN;					///<HBP model m parameter
+    float mw_tau_yield;		///<Yield strength of phasec
+    float mw_VolFrac; ///initial volume fraction of the water phase
+}StPhaseSoilWater;
 //<vs_non-Newtonian_end>
+
+//#define MAXNUMBERPHASE 10
+//extern __constant__ StPhaseSoilWater PHASESOILWATER[MAXNUMBERPHASE];
 
 ///Controls the output of information on the screen and/or log.
 typedef enum{ 

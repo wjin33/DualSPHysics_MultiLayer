@@ -36,7 +36,7 @@
 #define MAXNUMBERPHASE 10
 
 __constant__ StCteInteraction CTE;
-__constant__ StPhaseDruckerPrager PHASEDRUCKERPRAGER[MAXNUMBERPHASE];
+//__constant__ StPhaseSoilWater PHASESOILWATER[MAXNUMBERPHASE];
 #define CTE_AVAILABLE
 
 namespace cusph{
@@ -1544,7 +1544,7 @@ __global__ void KerComputeSpsTau(unsigned n,unsigned pini,float smag,float blin
     tauff[p1*3+2]=make_float2(tau_yz,tau_zz);
   }
 }
-
+/*
 __global__ void kerInitializeVolFracRhoTauPstrain(unsigned n,unsigned pini,const typecode *code
   ,float2 *tauff,float2 *pstrain, float4 *velrhop, float *VolFrac,TpVisco tvisco)
 {
@@ -1562,7 +1562,7 @@ __global__ void kerInitializeVolFracRhoTauPstrain(unsigned n,unsigned pini,const
                         // note if p1 is soil, VolFrac = 1 means 100% soil and if p1 is water, VolFrac = 1 means 100% water
     if(pp1 == 1)
     {// Don't need to worry about density of fluids, they are calculated from pressure in interaction_forces
-    velrhop[p1].w = PHASEDRUCKERPRAGER[pp1].DP_rho;//Need to Stores constants for the GPU interaction
+    velrhop[p1].w = PHASESOILWATER[pp1].DP_rho;//Need to Stores constants for the GPU interaction
     }
   }
 }
@@ -1575,7 +1575,7 @@ void InitializeVolFracRhoTauPstrain(unsigned np,unsigned npb,const typecode *cod
     kerInitializeVolFracRhoTauPstrain <<<sgridf,SPHBSIZE,0,stm>>> (npf,npb,code,(float2*)tau,(float2*)Pstraing,(float4*)Velrhopg,VolFracg,tvisco);
   }
 }
-
+*/
 //==============================================================================
 /// Computes sub-particle stress tensor (Tau) for SPS turbulence model.
 //==============================================================================

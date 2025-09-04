@@ -208,6 +208,7 @@ protected:
   float *Visco_etag;		  ///<Effective viscosity.  
   tsymatrix3f *SpsTaug;       ///<SPS sub-particle stress tensor.
   tsymatrix3f *Pstraing;      /// plastic strain
+  float       *Tkg;           /// State variable for Drucker-Prager model
   tsymatrix3f *SpsGradvelg;  ///<Velocity gradients.
   tsymatrix3f *D_tensorg;     ///<Deformation tensor. 
   float *AuxNNg;	         ///<Auxilary vs_non-Newtonian

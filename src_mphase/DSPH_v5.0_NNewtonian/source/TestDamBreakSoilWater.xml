@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<case app="GenCase v5.0.278c (30-10-2023)" date="14-07-2025 12:52:24">
+<case app="GenCase v5.0.278c (30-10-2023)" date="30-08-2025 16:52:44">
     <casedef>
         <constantsdef>
             <gravity x="0" y="0" z="-9.81" comment="Gravitational acceleration" units_comment="m/s^2" />
@@ -125,18 +125,18 @@
                     <_shapeout file="parts" />
                     <!-- Fluid particles -->
                     <setmkfluid mk="0" />
-                    <fillbox x="2.1" y="0.1" z="0.2">
+                    <fillbox x="2.6" y="0.1" z="0.1">
                         <modefill>void</modefill>
-                        <point x="1.992" y="0" z="0" />
-                        <size x="0.7" y="1" z="0.55" />
+                        <point x="2.492" y="0" z="0" />
+                        <size x="0.2" y="0.2" z="0.2" />
                     </fillbox>
                     <shapeout file="" />
                     <!-- Soil particles -->
                     <setmkfluid mk="1" />
-                    <fillbox x="2.9" y="0.1" z="0.2">
+                    <fillbox x="2.8" y="0.1" z="0.1">
                         <modefill>void</modefill>
                         <point x="2.692" y="0" z="0" />
-                        <size x="0.5" y="1" z="0.55" />
+                        <size x="0.2" y="0.2" z="0.2" />
                     </fillbox>
                     <shapeout file="" />
                 </mainlist>
@@ -217,19 +217,19 @@
                 <posmax x="default" y="default" z="default + 50%" />
             </simulationdomain>
         </parameters>
-        <particles np="13222" nb="9042" nbf="9042" mkboundfirst="10" mkfluidfirst="1">
+        <particles np="9096" nb="9042" nbf="9042" mkboundfirst="10" mkfluidfirst="1">
             <_summary>
                 <positions units_comment="metres (m)">
                     <posmin x="-0.1" y="-0.1" z="-0.1" />
                     <posmax x="3.2" y="1.05" z="0.5" />
                 </positions>
                 <fixed count="9042" id="0-9041" mkcount="2" mkvalues="10-11" />
-                <fluid count="4180" id="9042-13221" mkcount="2" mkvalues="1-2" />
+                <fluid count="54" id="9042-9095" mkcount="2" mkvalues="1-2" />
             </_summary>
             <fixed mkbound="0" mk="10" begin="0" count="8826" />
             <fixed mkbound="1" mk="11" begin="8826" count="216" />
-            <fluid mkfluid="0" mk="1" begin="9042" count="2470" />
-            <fluid mkfluid="1" mk="2" begin="11512" count="1710" />
+            <fluid mkfluid="0" mk="1" begin="9042" count="27" />
+            <fluid mkfluid="1" mk="2" begin="9069" count="27" />
         </particles>
         <constants>
             <data2d value="false" />

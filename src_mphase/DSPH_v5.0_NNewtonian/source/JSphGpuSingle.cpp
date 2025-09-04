@@ -346,7 +346,7 @@ void JSphGpuSingle::RunCellDivide(bool updateperiodic){
   //-Initiates Divide.
   CellDivSingle->Divide(Npb,Np-Npb-NpbPer-NpfPer,NpbPer,NpfPer,BoundChanged,Dcellg,Codeg,Timers,Posxyg,Poszg,Idpg);
   DivData=CellDivSingle->GetCellDivData();
-
+  
   //-Sorts particle data. | Ordena datos de particulas.
   TmgStart(Timers,TMG_NlSortData);
   {
@@ -407,6 +407,9 @@ void JSphGpuSingle::RunCellDivide(bool updateperiodic){
        tsymatrix3f* pstraing = ArraysGpu->ReserveSymatrix3f();
        CellDivSingle->SortDataArrays(Pstraing, pstraing);
        swap(Pstraing, pstraing);  ArraysGpu->Free(pstraing);
+       float* tkg = ArraysGpu->ReserveFloat();
+       CellDivSingle->SortDataArrays(Tkg, tkg);
+       swap(Tkg, tkg);  ArraysGpu->Free(tkg);
        float *VolFrac=ArraysGpu->ReserveFloat();
        CellDivSingle->SortDataArrays(VolFracg,VolFrac);
        swap(VolFracg,VolFrac);  ArraysGpu->Free(VolFrac);

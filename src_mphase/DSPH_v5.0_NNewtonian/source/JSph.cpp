@@ -3241,8 +3241,8 @@ void JSph::InitSWDPPhase(const JXml *sxml,std::string xmlpath) {
   TiXmlNode* node=sxml->GetNodeSimple("case.execution.special.soilwater");
   sxml->CheckElementNames(node->ToElement(),true,"*phase");
   PhaseCount=sxml->CountElements(node,"phase");
-
   Log->Printf("==: PhaseCount:%d",PhaseCount);
+  PhaseArray=new StPhaseArray[PhaseCount]; memset(PhaseArray,0,sizeof(StPhaseArray)*PhaseCount);
   PhaseSoilWater=new StPhaseSoilWater[PhaseCount]; 	memset(PhaseSoilWater,0,sizeof(StPhaseSoilWater)*PhaseCount);
   if(PhaseCount<1)Run_Exceptioon("The number of phases is invalid.");
   TiXmlElement* ele=node->FirstChildElement("phase");
@@ -3253,8 +3253,17 @@ void JSph::InitSWDPPhase(const JXml *sxml,std::string xmlpath) {
     unsigned cmk=MkInfo->GetMkBlockByMkFluid(PhaseSoilWater[c].mkfluid);
     if(cmk>=MkInfo->Size())Run_Exceptioon(fun::PrintStr("No particles with mkfluid=%u",mkfluid));
     const JSphMkBlock* bk=MkInfo->Mkblock(cmk);
-
     //PhaseArray holds physical proprerties of phases
+    PhaseArray[c].phaseid=c;
+    PhaseArray[c].Gamma=sxml->ReadElementFloat(ele,"gamma","value",true);
+    if(!PhaseArray[c].Gamma)PhaseArray[c].Gamma=CSP.gamma;
+    PhaseArray[c].rho=sxml->ReadElementFloat(ele,"mw_rhop","value",true);
+    if(!PhaseArray[c].rho)PhaseArray[c].rho=CSP.rhopzero;
+    //PhaseArray[c].mass_ph to be setup in ConfigConstants
+    PhaseArray[c].Cs0=sxml->ReadElementFloat(ele,"mw_csound","value",true);
+    if(!PhaseArray[c].Cs0)PhaseArray[c].Cs0=CSP.cs0;
+    // Set PhaseArray that need calculating in the loop
+    if(PhaseArray[c].Cs0)PhaseArray[c].CteB=PhaseArray[c].Cs0*PhaseArray[c].Cs0*PhaseArray[c].rho/PhaseArray[c].Gamma;
     PhaseSoilWater[c].phaseid=c;
     PhaseSoilWater[c].idbegin=bk->Begin;
     PhaseSoilWater[c].count=bk->Count;
@@ -3292,38 +3301,47 @@ void JSph::InitSWDPPhase(const JXml *sxml,std::string xmlpath) {
     StPhaseSoilWater a=PhaseSoilWater[c];
     PhaseSoilWater[c]=PhaseSoilWater[c2];
     PhaseSoilWater[c2]=a;
+    StPhaseArray b=PhaseArray[c];
+    PhaseArray[c]=PhaseArray[c2];
+    PhaseArray[c2]=b;
   }
   //-Shows phase information.
   Log->Printf("PhaseCount:%d",PhaseCount);
   for(unsigned c=0; c<=PhaseCount-1; c++) {
-    const StPhaseSoilWater &ar=PhaseSoilWater[c];
+    const StPhaseArray &ar=PhaseArray[c];
+    Log->Printf("Phase %d",c);
+    Log->Printf("  Rho......: %f",ar.rho);
+    if(ar.Cs0)Log->Printf("  Cs0......: %f",ar.Cs0);
+    if(ar.Gamma)Log->Printf("  Gamma....: %f",ar.Gamma);
+    
+    const StPhaseSoilWater &dpr=PhaseSoilWater[c];
     if(c == 0){
       Log->Printf("Phase %d",c);
-      Log->Printf("  mw_rhop......: %f",ar.mw_rho);
-      if(ar.mw_Cs0)Log->Printf("  mw_Cs0......: %f",ar.mw_Cs0);
-      Log->Printf("  mw artificial alpha: %f",ar.mw_visco);
-      Log->Printf("  mw specific yield stress (Pa m3/kg): %f",ar.mw_tau_yield);
-      Log->Printf("  mw max specific yield stress: %f",ar.mw_tau_max);
-      Log->Printf("  mw tau_max multiplier for use with Bingham model or bi-viscosity model(tau_bi=tau_max*Bi_multi): %f",ar.mw_Bi_multi);
-      Log->Printf("  mw power law coef. m (0 for Newtonian): %f",ar.mw_m_NN);
-      Log->Printf("  mw power law coef. n (1 for Newtonian): %f",ar.mw_n_NN);
-      Log->Printf("  mw volumetric fraction: %f",ar.mw_VolFrac);
+      Log->Printf("  mw_rhop......: %f",dpr.mw_rho);
+      if(dpr.mw_Cs0)Log->Printf("  mw_Cs0......: %f",dpr.mw_Cs0);
+      Log->Printf("  mw artificial alpha: %f",dpr.mw_visco);
+      Log->Printf("  mw specific yield stress (Pa m3/kg): %f",dpr.mw_tau_yield);
+      Log->Printf("  mw max specific yield stress: %f",dpr.mw_tau_max);
+      Log->Printf("  mw tau_max multiplier for use with Bingham model or bi-viscosity model(tau_bi=tau_max*Bi_multi): %f",dpr.mw_Bi_multi);
+      Log->Printf("  mw power law coef. m (0 for Newtonian): %f",dpr.mw_m_NN);
+      Log->Printf("  mw power law coef. n (1 for Newtonian): %f",dpr.mw_n_NN);
+      Log->Printf("  mw volumetric fraction: %f",dpr.mw_VolFrac);
     }
     if(c == 1){
       Log->Printf("Phase %d",c);
-      Log->Printf("  DP_rhop......: %f",ar.DP_rho);
-      if(ar.DP_Cs0)Log->Printf("  DP_Cs0......: %f",ar.DP_Cs0);
-      Log->Printf("  DP artificial alpha: %f",ar.DP_visco);
-      Log->Printf("  DP wall friction: %f",ar.DP_wallfriction);
-      Log->Printf("  DP volumetric fraction: %f",ar.DP_VolFrac);
-      Log->Printf("  DP Shear modulus: %f",ar.DP_G);
-      Log->Printf("  DP Elastic modulus: %f",ar.DP_K);
-      Log->Printf("  MC_phi: %f",ar.MC_phi);
-      Log->Printf("  MC_c: %f",ar.MC_c);
-      Log->Printf("  MC_psi: %f",ar.MC_psi);
-      Log->Printf("  DP_Dc: %f",ar.DP_Dc);
-      Log->Printf("  DP Drag_alphad: %f",ar.Drag_alphad);
-      Log->Printf("  DP Drag_betad: %f",ar.Drag_betad);
+      Log->Printf("  DP_rhop......: %f",dpr.DP_rho);
+      if(dpr.DP_Cs0)Log->Printf("  DP_Cs0......: %f",dpr.DP_Cs0);
+      Log->Printf("  DP artificial alpha: %f",dpr.DP_visco);
+      Log->Printf("  DP wall friction: %f",dpr.DP_wallfriction);
+      Log->Printf("  DP volumetric fraction: %f",dpr.DP_VolFrac);
+      Log->Printf("  DP Shear modulus: %f",dpr.DP_G);
+      Log->Printf("  DP Elastic modulus: %f",dpr.DP_K);
+      Log->Printf("  MC_phi: %f",dpr.MC_phi);
+      Log->Printf("  MC_c: %f",dpr.MC_c);
+      Log->Printf("  MC_psi: %f",dpr.MC_psi);
+      Log->Printf("  DP_Dc: %f",dpr.DP_Dc);
+      Log->Printf("  DP Drag_alphad: %f",dpr.Drag_alphad);
+      Log->Printf("  DP Drag_betad: %f",dpr.Drag_betad);
     }     
   }
   Log->Print("");
@@ -3360,7 +3378,7 @@ void JSph::ConfigConstantsMP(){
 void JSph::ConfigConstantsMP_SWDP(){
   //Check if Cs0 is present for ALL phases
   bool Cs0_present=true;
-  for(unsigned c=0; c<PhaseCount; c++)if(!PhaseSoilWater[c].DP_Cs0 || !PhaseSoilWater[c].mw_Cs0)Cs0_present=false;
+  for(unsigned c=0; c<PhaseCount; c++)if(!(PhaseSoilWater[c].DP_Cs0 || PhaseSoilWater[c].mw_Cs0))Cs0_present=false;
   if(Cs0_present){
     //Compute a new Cs0 for all system
     CSP.cs0=0;
@@ -3398,7 +3416,8 @@ void JSph::LoadMultiphaseData(unsigned np,const unsigned *idp,const typecode *co
       if(cp>=PhaseCount)Run_Exceptioon("Fluid particle without phase information...");
       if (PhaseArray) velrhop[p].w=PhaseArray[cp].rho;
       //if (PhaseCte) velrhop[p].w=PhaseCte[cp].rho;
-      if (PhaseSoilWater)velrhop[p].w=PhaseSoilWater[cp].DP_rho;
+      if (PhaseSoilWater && cp == 1)velrhop[p].w=PhaseSoilWater[cp].DP_rho;
+      if (PhaseSoilWater && cp == 0)velrhop[p].w=PhaseSoilWater[cp].mw_rho;
       //auxNN[p] = PhaseCte[cp].visco; //this may be used to load any auxilary value
     }
   }
@@ -3406,7 +3425,7 @@ void JSph::LoadMultiphaseData(unsigned np,const unsigned *idp,const typecode *co
 
 //==============================================================================
 /// Returns if multiphase is enabled.
-//==============================================================================
+//=============================================================================
 std::string JSph::GetPhaseName(bool multiphase) {
   return(multiphase ? "NN-MultiPhase" : "SinglePhase");
 }

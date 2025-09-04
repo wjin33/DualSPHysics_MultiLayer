@@ -151,7 +151,7 @@ void JSphGpu::InitVars(){
   PosxyPreg=NULL; PoszPreg=NULL; VelrhopPreg=NULL; //-Symplectic
   SigmaPreg=NULL;//ruofeng
 
-  SpsTaug=NULL; Pstraing = NULL; SpsGradvelg=NULL;                  //-Laminar+SPS. 
+  SpsTaug=NULL; Pstraing = NULL;  Tkg = NULL; SpsGradvelg=NULL;                  //-Laminar+SPS. 
   D_tensorg=NULL;				  											 //-Deformation tensor. //<vs_non-Newtonian>
   AuxNNg=NULL;                   								 //-General aux <vs_non-Newtonian>
   VolFracg = NULL;
@@ -426,6 +426,7 @@ void JSphGpu::ResizeGpuMemoryParticles(unsigned npnew){
   float4      *velrhoppre =SaveArrayGpu(Np,VelrhopPreg);
   tsymatrix3f *spstau     =SaveArrayGpu(Np,SpsTaug);
   tsymatrix3f *pstrain    =SaveArrayGpu(Np,Pstraing);
+  float       *tk         =SaveArrayGpu(Np,Tkg);
   float3      *boundnormal=SaveArrayGpu(Np,BoundNormalg);
   float3      *motionvel  =SaveArrayGpu(Np,MotionVelg);
   float       *auxnn			=SaveArrayGpu(Np,AuxNNg);  //<vs_non-Newtonian>
@@ -448,6 +449,7 @@ void JSphGpu::ResizeGpuMemoryParticles(unsigned npnew){
   ArraysGpu->Free(VelrhopPreg);
   ArraysGpu->Free(SpsTaug);
   ArraysGpu->Free(Pstraing);
+  ArraysGpu->Free(Tkg);
   ArraysGpu->Free(BoundNormalg);
   ArraysGpu->Free(MotionVelg);
   ArraysGpu->Free(AuxNNg); //<vs_non-Newtonian>
@@ -473,6 +475,7 @@ void JSphGpu::ResizeGpuMemoryParticles(unsigned npnew){
   if(velrhoppre) VelrhopPreg =ArraysGpu->ReserveFloat4();
   if(spstau)     SpsTaug     =ArraysGpu->ReserveSymatrix3f();
   if(pstrain)    Pstraing    =ArraysGpu->ReserveSymatrix3f();
+  if(tk)         Tkg         =ArraysGpu->ReserveFloat();
   if(boundnormal)BoundNormalg=ArraysGpu->ReserveFloat3();
   if(motionvel)  MotionVelg  =ArraysGpu->ReserveFloat3();
   if(auxnn)		AuxNNg	       = ArraysGpu->ReserveFloat();  //<vs_non-Newtonian>
@@ -495,6 +498,7 @@ void JSphGpu::ResizeGpuMemoryParticles(unsigned npnew){
   RestoreArrayGpu(Np,velrhoppre,VelrhopPreg);
   RestoreArrayGpu(Np,spstau,SpsTaug);
   RestoreArrayGpu(Np,pstrain,Pstraing);
+  RestoreArrayGpu(Np,tk,Tkg);
   RestoreArrayGpu(Np,boundnormal,BoundNormalg);
   RestoreArrayGpu(Np,motionvel,MotionVelg);
   RestoreArrayGpu(Np,auxnn,AuxNNg);	            //<vs_non-Newtonian>
@@ -559,6 +563,7 @@ void JSphGpu::ReserveBasicArraysGpu(){
       //Sigmag = ArraysGpu->ReserveSymatrix3f(); //This is used for stress output
       VolFracg = ArraysGpu->ReserveFloat();
       Pstraing = ArraysGpu->ReserveSymatrix3f();
+      Tkg = ArraysGpu->ReserveFloat();
       //Forceg = ArraysGpu->ReserveFloat3();
   }
 
@@ -650,8 +655,8 @@ void JSphGpu::ConstantDataUp(){
   cusph::CteInteractionUp(&ctes);
   //<vs_non-Newtonian>
   if (MultiPhase) {
-      if (TVisco == VISCO_SoilWater) cusphNN::CteInteractionUp_NN(PhaseCount, PhaseSoilWater);
-      else cusphNN::CteInteractionUp_NN(PhaseCount, PhaseCte, PhaseArray);
+      if (TVisco == VISCO_SoilWater) cusphNN::SoilWaterInteractionUp_NN(PhaseCount, PhaseSoilWater, PhaseArray);
+      else cusphNN::CteInteractionUp_NN(PhaseCount,PhaseCte,PhaseArray);
   }
   //CheckCudaError("CteInteractionUp_NN", "Failed copying constants to GPU.");
   Check_CudaErroor("Failed copying constants to GPU.");
@@ -971,7 +976,8 @@ void JSphGpu::InitRunGpu(){
       //cudaMemset(Forceg,0,sizeof(float3)*Np);
       cudaMemset(Pstraing,0,sizeof(tsymatrix3f)*Np);
       cudaMemset(VolFracg,0,sizeof(float)*Np);
-      cusphNN::InitializeVolFracRhoTauPstrain(Np,Npb,Codeg,SpsTaug,Pstraing,Velrhopg,VolFracg,TVisco); //Need to be updated
+      cudaMemset(Tkg,0,sizeof(float)*Np);
+      cusphNN::InitializeVolFracRhoTauPstrain(Np,Npb,Codeg,SpsTaug,Pstraing,Tkg,Velrhopg,VolFracg,TVisco); //Need to be updated
   }          
   if(CaseNfloat)InitFloating();
   if(MotionVelg)cudaMemset(MotionVelg,0,sizeof(float3)*Np);
@@ -997,7 +1003,7 @@ void JSphGpu::PreInteractionVars_Forces(unsigned np,unsigned npb){
   //<vs_non-Newtonian>
   if(ViscEtaDtg)cudaMemset(ViscEtaDtg,0,sizeof(float)*np);             //ViscEtaDtg[]=0 //<vs_non-Newtonian>
   if(SpsGradvelg)cudaMemset(SpsGradvelg,0,sizeof(tsymatrix3f)*np);    //SpsGradvelg[]=(0,0,0,0,0,0). 
-  if(SpsTaug)	cudaMemset(SpsTaug,0,sizeof(tsymatrix3f)*np);
+  if(TVisco!=VISCO_SoilWater && SpsTaug) cudaMemset(SpsTaug,0,sizeof(tsymatrix3f)*np);
   if(D_tensorg)cudaMemset(D_tensorg,0,sizeof(tsymatrix3f)*np);
   if(Visco_etag)cudaMemset(Visco_etag,0,sizeof(float)*np);
 
@@ -1026,8 +1032,8 @@ void JSphGpu::PreInteraction_Forces(){
   if(MultiPhase) {//<vs_non-Newtonian>
     D_tensorg=ArraysGpu->ReserveSymatrix3f();
     Visco_etag=ArraysGpu->ReserveFloat();
-    SpsTaug=ArraysGpu->ReserveSymatrix3f();
-    Pstraing=ArraysGpu->ReserveSymatrix3f();
+    if(TVisco!=VISCO_SoilWater) SpsTaug=ArraysGpu->ReserveSymatrix3f();
+    if(TVisco!=VISCO_SoilWater) Pstraing=ArraysGpu->ReserveSymatrix3f();
   }
 
   //-Initialise arrays.
@@ -1065,12 +1071,13 @@ void JSphGpu::PosInteraction_Forces(){
     ArraysGpu->Free(D_tensorg);	 D_tensorg=NULL;
     ArraysGpu->Free(Visco_etag);	 Visco_etag=NULL;
     ArraysGpu->Free(ViscEtaDtg);	 ViscEtaDtg=NULL;
-    ArraysGpu->Free(SpsTaug); SpsTaug=NULL;
-    ArraysGpu->Free(Pstraing); Pstraing=NULL;
+    //ArraysGpu->Free(SpsTaug); SpsTaug=NULL;
+    //ArraysGpu->Free(Pstraing); Pstraing=NULL;
     if (TVisco != VISCO_SoilWater) {
       ArraysGpu->Free(SpsTaug);      SpsTaug = NULL;
       ArraysGpu->Free(VolFracg);  VolFracg = NULL;
       ArraysGpu->Free(Pstraing); Pstraing=NULL;
+      ArraysGpu->Free(Tkg); Tkg=NULL;
     }
   }
 }
@@ -1142,7 +1149,7 @@ void JSphGpu::ComputeSymplecticPre(double dt){
   const float3 *indirvel=(InOut? InOut->GetDirVelg(): NULL);
   cusphs::ComputeStepSymplecticPre(WithFloating,shift,inout,Np,Npb,VelrhopPreg,Arg
     ,Aceg,ShiftPosfsg,SigmaPreg,Rsigmag,indirvel,dt05,RhopZero,RhopOutMin,RhopOutMax,Gravity
-    ,Codeg,movxyg,movzg,Velrhopg,Sigmag,NULL);
+    ,Codeg,movxyg,movzg,Velrhopg,Sigmag,Tkg,Pstraing,NULL);
   //-Applies displacement to non-periodic fluid particles.
   //-Aplica desplazamiento a las particulas fluid no periodicas.
   cusph::ComputeStepPos2(PeriActive,WithFloating,Np,Npb,PosxyPreg,PoszPreg
@@ -1173,7 +1180,7 @@ void JSphGpu::ComputeSymplecticCorr(double dt){
   const float3 *indirvel=(InOut? InOut->GetDirVelg(): NULL);
   cusphs::ComputeStepSymplecticCor(WithFloating,shift,inout,Np,Npb,VelrhopPreg
     ,Arg,Aceg,ShiftPosfsg,SigmaPreg,Rsigmag,indirvel,dt05,dt,RhopZero,RhopOutMin,RhopOutMax,Gravity
-    ,Codeg,movxyg,movzg,Velrhopg,Sigmag,NULL);
+    ,Codeg,movxyg,movzg,Velrhopg,Sigmag,Tkg,Pstraing,NULL);
   //-Applies displacement to non-periodic fluid particles.
   //-Aplica desplazamiento a las particulas fluid no periodicas.
   cusph::ComputeStepPos2(PeriActive,WithFloating,Np,Npb,PosxyPreg,PoszPreg
@@ -1197,14 +1204,22 @@ void JSphGpu::ComputeSymplecticCorr(double dt){
 //==============================================================================
 double JSphGpu::DtVariable(bool final){
   //-dt1 depends on force per unit mass.
-  const double acemax=sqrt(double(AceMax));
-  const double dt1=(AceMax? (sqrt(double(KernelH)/AceMax)): DBL_MAX); 
+  if (TVisco != VISCO_SoilWater) const double acemax=sqrt(double(AceMax));
+  double dt1=0.0;
+  double dt2=0.0;
+  double dt3=0.0;
+  if (TVisco != VISCO_SoilWater) dt1=(AceMax? (sqrt(double(KernelH)/AceMax)): DBL_MAX); 
   //-dt2 combines the Courant and the viscous time-step controls.
-  const double dt2=double(KernelH)/(max(Cs0,VelMax*10.)+double(KernelH)*ViscDtMax);
+  dt2=double(KernelH)/(max(Cs0,VelMax*10.)+double(KernelH)*ViscDtMax);
   //Viscous time step //<vs_non-Newtonian>
-  const double dt3=(MultiPhase ? double(KernelH*KernelH)/double(ViscEtaDtMax*lamda) : DBL_MAX); //<vs_non-Newtonian> 
+  if (TVisco != VISCO_SoilWater) dt3=(MultiPhase ? double(KernelH*KernelH)/double(ViscEtaDtMax*lamda) : DBL_MAX); //<vs_non-Newtonian> 
   //-dt new value of time step.
-  double dt = double(CFLnumber)*min(dt3, min(dt1, dt2));  //<vs_non-Newtonian>
+  double dt;
+  if (TVisco == VISCO_SoilWater){
+    dt = double(CFLnumber)*dt2;
+  }else{
+    dt = double(CFLnumber)*min(dt3, min(dt1, dt2));  //<vs_non-Newtonian>
+  }
   if(FixedDt)dt=FixedDt->GetDt(TimeStep,dt);
   if(fun::IsNAN(dt) || fun::IsInfinity(dt))Run_Exceptioon(fun::PrintStr("The computed Dt=%f (from AceMax=%f, VelMax=%f, ViscDtMax=%f) is NaN or infinity at nstep=%u.",dt,AceMax,VelMax,ViscDtMax,Nstep));
   if(dt<double(DtMin)){ 

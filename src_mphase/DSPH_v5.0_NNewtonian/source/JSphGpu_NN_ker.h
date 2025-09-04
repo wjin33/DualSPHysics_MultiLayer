@@ -29,7 +29,7 @@ You should have received a copy of the GNU Lesser General Public License along w
 namespace cusphNN {
 
   void CteInteractionUp_NN(unsigned phasecount,const StPhaseCte *phasecte,const StPhaseArray *phasearray);
-  void CteInteractionUp_NN(unsigned phasecount,const StPhaseSoilWater *phaseSoilWater);
+  void SoilWaterInteractionUp_NN(unsigned phasecount,const StPhaseSoilWater *phaseSoilWater,const StPhaseArray *phasearray);
   void PeriodicDuplicateVerlet(unsigned n,unsigned pini,tuint3 domcells,tdouble3 perinc
     ,const unsigned *listp,unsigned *idp,typecode *code,unsigned *dcell
     ,double2 *posxy,double *posz,float4 *velrhop,float *auxnn,float4 *velrhopm1);
@@ -48,7 +48,7 @@ namespace cusphNN {
 	  , const typecode *code, const unsigned *idp, const float3 *boundnormal
 	  , const float3 *motionvel, float4 *velrhop,tsymatrix3f *sigma);
 
-  void InitializeVolFracRhoTauPstrain(unsigned np,unsigned npb,const typecode *code, tsymatrix3f *tau, tsymatrix3f *Pstraing, float4 *Velrhopg,float *VolFracg,TpVisco tvisco, cudaStream_t stm=NULL);
+  void InitializeVolFracRhoTauPstrain(unsigned np,unsigned npb,const typecode *code, tsymatrix3f *tau, tsymatrix3f *Pstraing, float *Tkg, float4 *Velrhopg,float *VolFracg,TpVisco tvisco, cudaStream_t stm=NULL);
 
 }//end of file
 #endif

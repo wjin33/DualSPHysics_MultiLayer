@@ -80,9 +80,9 @@ StGpuInfo GetCudaDeviceInfo(int gid){
   g.mp=deviceProp.multiProcessorCount;
   g.coresmp=_ConvertSMVer2Cores(deviceProp.major,deviceProp.minor);
   g.cores=g.coresmp*g.mp;
-  g.clockrate=deviceProp.clockRate;
+  //g.clockrate=deviceProp.clockRate;
 #if CUDART_VERSION >= 5000
-  g.clockratemem=deviceProp.memoryClockRate;
+  //g.clockratemem=deviceProp.memoryClockRate;
   g.busmem=deviceProp.memoryBusWidth;
   g.cachelv2=deviceProp.l2CacheSize;
 #endif
@@ -91,9 +91,9 @@ StGpuInfo GetCudaDeviceInfo(int gid){
   g.regsblock=deviceProp.regsPerBlock;
   g.maxthmp=deviceProp.maxThreadsPerMultiProcessor;
   g.maxthblock=deviceProp.maxThreadsPerBlock;
-  g.overlap=deviceProp.deviceOverlap;
+  //g.overlap=deviceProp.deviceOverlap;
   g.overlapcount=deviceProp.asyncEngineCount;
-  g.limitrun=deviceProp.kernelExecTimeoutEnabled;
+  //g.limitrun=deviceProp.kernelExecTimeoutEnabled;
   g.integrated=deviceProp.integrated;
   g.maphostmem=deviceProp.canMapHostMemory;
   g.eccmode=deviceProp.ECCEnabled;

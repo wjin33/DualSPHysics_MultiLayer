@@ -14,7 +14,7 @@ COMPILE_MOORDYN=NO
 LIBS_DIRECTORIES=-L./
 LIBS_DIRECTORIES:=$(LIBS_DIRECTORIES) -L../lib/linux_gcc
 
-EXECNAME=DualSPHysics5.0_Multiphase0529_linux64
+EXECNAME=DualSPHysics5.0_Multiphase0827_linux64
 EXECS_DIRECTORY=../../../bin/linux
 
 # -std=c++0x ---> Used to avoid errors for calls to enums
@@ -30,7 +30,7 @@ else
     CCFLAGS+= -march=native
   endif
 endif
-CC=g++-9
+CC=g++
 CCLINKFLAGS=-fopenmp -lgomp
 
 #Required for GCC versions >=5.0
@@ -57,7 +57,7 @@ ifeq ($(COMPILE_MOORDYN), NO)
 endif
 
 #=============== CUDA selection ===============
-CUDAVER=128
+CUDAVER=130
 
 #=============== CUDA toolkit directory (make appropriate for local CUDA installation) ===============
 ifeq ($(CUDAVER),00)
@@ -75,8 +75,8 @@ endif
 ifeq ($(CUDAVER),115)
   DIRTOOLKIT=/usr/local/cuda-11.5	
 endif
-ifeq ($(CUDAVER),128)
-  DIRTOOLKIT=/usr/local/cuda-12.8
+ifeq ($(CUDAVER),130)
+  DIRTOOLKIT=/usr/local/cuda
 endif
 #=============== Select GPU architectures ===============
 ifeq ($(CUDAVER),00)
@@ -112,11 +112,11 @@ ifeq ($(CUDAVER),115)
   GENCODE:=$(GENCODE) -gencode=arch=compute_75,code=\"sm_75,compute_75\"
   GENCODE:=$(GENCODE) -gencode=arch=compute_86,code=\"sm_86,compute_86\"
 endif
-ifeq ($(CUDAVER),128)
-  GENCODE:=$(GENCODE) -gencode=arch=compute_70,code=\"sm_70,compute_70\"
+ifeq ($(CUDAVER),130)
   GENCODE:=$(GENCODE) -gencode=arch=compute_75,code=\"sm_75,compute_75\"
   GENCODE:=$(GENCODE) -gencode=arch=compute_80,code=\"sm_80,compute_80\"
   GENCODE:=$(GENCODE) -gencode=arch=compute_86,code=\"sm_86,compute_86\"
+  GENCODE:=$(GENCODE) -gencode=arch=compute_89,code=\"sm_89,compute_89\"
 endif
 
 
